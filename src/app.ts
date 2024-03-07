@@ -1,5 +1,6 @@
 // We use webpack to package our shaders as string resources that we can import
 import shaderCode from "./triangle.wgsl";
+import { RadixSorter } from "./radix_sort";
 
 (async () => {
     if (navigator.gpu === undefined) {
@@ -11,6 +12,36 @@ import shaderCode from "./triangle.wgsl";
     // Get a GPU device to render with
     let adapter = await navigator.gpu.requestAdapter();
     let device = await adapter.requestDevice();
+
+    let radixSorter = new RadixSorter(device);
+    let keys = [8, 6, 3, 5, 7, 2, 1, 10, 9, 4];
+    let keyBuf = device.createBuffer({
+        mappedAtCreation: true,
+        size: radixSorter.getAlignedSize(10) * 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    });
+    new Uint32Array(keyBuf.getMappedRange()).set(new Uint32Array(keys));
+    keyBuf.unmap();
+    let values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let valueBuf = device.createBuffer({
+        mappedAtCreation: true,
+        size: radixSorter.getAlignedSize(10) * 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    });
+    new Uint32Array(valueBuf.getMappedRange()).set(new Uint32Array(values));
+    valueBuf.unmap();
+    await radixSorter.sort(keyBuf, valueBuf, 10, false);
+    let debugBuf = device.createBuffer({
+        size: radixSorter.getAlignedSize(10) * 4,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    var commandEncoder = device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(valueBuf, 0, debugBuf, 0, debugBuf.size);
+    device.queue.submit([commandEncoder.finish()]);
+    await device.queue.onSubmittedWorkDone(); 
+    await debugBuf.mapAsync(GPUMapMode.READ);
+    var debugVals = new Uint32Array(debugBuf.getMappedRange());
+    console.log(debugVals);
 
     // Get a context to display our rendered image on the canvas
     let canvas = document.getElementById("webgpu-canvas") as HTMLCanvasElement;

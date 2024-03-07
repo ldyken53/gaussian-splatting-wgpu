@@ -1,7 +1,7 @@
 {
-  "name": "webgpu-webpack-starter",
+  "name": "gaussian-splatting-wgpu",
   "version": "1.0.0",
-  "description": "A starter template for WebGPU development the uses webpack to build the code and manage dependencies.",
+  "description": "An implementation of the 3D gaussian splatting method in WebGPU",
   "main": "app.js",
   "scripts": {
     "build": "webpack",
@@ -10,15 +10,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Twinklebear/webgpu-webpack-starter.git"
+    "url": "git+https://github.com/ldyken53/gaussian-splatting-wgpu.git"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/Twinklebear/webgpu-webpack-starter/issues"
+    "url": "https://github.com/ldyken53/gaussian-splatting-wgpu.git/issues"
   },
-  "homepage": "https://github.com/Twinklebear/webgpu-webpack-starter#readme",
+  "homepage": "https://github.com/ldyken53/gaussian-splatting-wgpu.git#readme",
   "devDependencies": {
     "html-webpack-plugin": "^5.3.2",
     "ts-loader": "^9.2.8",
