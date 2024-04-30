@@ -1,6 +1,8 @@
 // We use webpack to package our shaders as string resources that we can import
 import shaderCode from "./triangle.wgsl";
 import { RadixSorter } from "./radix_sort";
+import { loadFileAsArrayBuffer, PackedGaussians } from "./ply";
+import { Renderer } from "./renderer";
 
 (async () => {
     if (navigator.gpu === undefined) {
@@ -13,14 +15,36 @@ import { RadixSorter } from "./radix_sort";
     let adapter = await navigator.gpu.requestAdapter();
     let device = await adapter.requestDevice();
 
+    // Grab needed HTML elements
+    const plyFileInput = document.getElementById('plyButton') as HTMLInputElement;
+    const loadingPopup = document.getElementById('loading-popup')! as HTMLDivElement;
+
+    function handlePlyChange(event: any) {
+        const file = event.target.files[0];
+    
+        async function onFileLoad(arrayBuffer: ArrayBuffer) {
+            const gaussians = new PackedGaussians(arrayBuffer);
+            console.log(gaussians);
+            const renderer = new Renderer(canvas, device, gaussians);
+            loadingPopup.style.display = 'none'; // hide loading popup
+        }
+    
+        if (file) {
+            loadingPopup.style.display = 'block'; // show loading popup
+            loadFileAsArrayBuffer(file)
+                .then(onFileLoad);
+        }
+    }
+    plyFileInput!.addEventListener('change', handlePlyChange);
+
     let radixSorter = new RadixSorter(device);
-    let keys = [8, 6, 3, 5, 7, 2, 1, 10, 9, 4];
+    let keys = [8.4, 6.5, 0, 6.0, 6.77, -1, -2, 10, 9, 4];
     let keyBuf = device.createBuffer({
         mappedAtCreation: true,
         size: radixSorter.getAlignedSize(10) * 4,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
     });
-    new Uint32Array(keyBuf.getMappedRange()).set(new Uint32Array(keys));
+    new Float32Array(keyBuf.getMappedRange()).set(new Float32Array(keys));
     keyBuf.unmap();
     let values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     let valueBuf = device.createBuffer({
@@ -30,7 +54,7 @@ import { RadixSorter } from "./radix_sort";
     });
     new Uint32Array(valueBuf.getMappedRange()).set(new Uint32Array(values));
     valueBuf.unmap();
-    await radixSorter.sort(keyBuf, valueBuf, 10, false);
+    await radixSorter.sort(keyBuf, valueBuf, 10, false, true);
     let debugBuf = device.createBuffer({
         size: radixSorter.getAlignedSize(10) * 4,
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,

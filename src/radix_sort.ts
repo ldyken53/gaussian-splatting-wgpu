@@ -1,6 +1,8 @@
 import reverse_buffer from "./reverse_buffer.wgsl";
 import merge_sorted_chunks from "./merge_sorted_chunks.wgsl";
 import radix_sort_chunk from "./radix_sort_chunk.wgsl";
+import float_to_uint from "./float_to_uint.wgsl";
+import uint_to_float from "./uint_to_float.wgsl";
 import { buildPushConstantsBuffer } from "./util";
 
 export class RadixSorter {
@@ -14,8 +16,10 @@ export class RadixSorter {
     sortPipeline: GPUComputePipeline;
     mergePipeline: GPUComputePipeline;
     reversePipeline: GPUComputePipeline;
+    floatToUintPipeline: GPUComputePipeline;
+    uintToFloatPipeline: GPUComputePipeline;
     getAlignedSize: (size: number) => number;
-    sort: (keys: GPUBuffer, values: GPUBuffer, size: number, reverse: boolean) => Promise<void>;
+    sort: (keys: GPUBuffer, values: GPUBuffer, size: number, reverse: boolean, keysFloat: boolean) => Promise<void>;
     constructor(device : GPUDevice) {
         this.device = device;
 
@@ -158,6 +162,22 @@ export class RadixSorter {
                 entryPoint: "main",
             },
         });
+
+        this.floatToUintPipeline = this.device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: this.device.createShaderModule({code: float_to_uint}),
+                entryPoint: "main"
+            }
+        });
+
+        this.uintToFloatPipeline = this.device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: this.device.createShaderModule({code: uint_to_float}),
+                entryPoint: "main"
+            }
+        });
     }
 }
 
@@ -179,7 +199,27 @@ RadixSorter.prototype.getAlignedSize = function(size : number) {
 };
 
 // Input buffers are assumed to be of size "alignedSize"
-RadixSorter.prototype.sort = async function(keys : GPUBuffer, values : GPUBuffer, size : number, reverse : boolean) {
+RadixSorter.prototype.sort = async function(keys : GPUBuffer, values : GPUBuffer, size : number, reverse : boolean = false, keysFloat: boolean = false) {
+    if (keysFloat) {
+        var floatToUintBindgroup = this.device.createBindGroup({
+            layout: this.floatToUintPipeline.getBindGroupLayout(0),
+            entries: [
+                {
+                    binding: 0,
+                    resource: {
+                        buffer: keys,
+                    },
+                },
+            ],
+        });
+        var commandEncoder = this.device.createCommandEncoder();
+        var pass = commandEncoder.beginComputePass();
+        pass.setPipeline(this.floatToUintPipeline);
+        pass.setBindGroup(0, floatToUintBindgroup);
+        pass.dispatchWorkgroups(Math.ceil(size / 64), 1, 1);
+        pass.end();
+        this.device.queue.submit([commandEncoder.finish()]);
+    }
     // Has to be a pow2 * chunkSize elements, since we do log_2 merge steps up
     var chunkCount = nextPow2(Math.ceil(size / SortChunkSize));
     var alignedSize = chunkCount * SortChunkSize;
@@ -413,6 +453,28 @@ RadixSorter.prototype.sort = async function(keys : GPUBuffer, values : GPUBuffer
 
     this.device.queue.submit([commandEncoder.finish()]);
     await this.device.queue.onSubmittedWorkDone();
+
+    if (keysFloat) {
+        var uintToFloatBindgroup = this.device.createBindGroup({
+            layout: this.uintToFloatPipeline.getBindGroupLayout(0),
+            entries: [
+                {
+                    binding: 0,
+                    resource: {
+                        buffer: keys,
+                    },
+                },
+            ],
+        });
+        var commandEncoder = this.device.createCommandEncoder();
+        var pass = commandEncoder.beginComputePass();
+        pass.setPipeline(this.uintToFloatPipeline);
+        pass.setBindGroup(0, uintToFloatBindgroup);
+        pass.dispatchWorkgroups(Math.ceil(size / 64), 1, 1);
+        pass.end();
+        this.device.queue.submit([commandEncoder.finish()]);
+        await this.device.queue.onSubmittedWorkDone();
+    }
 
     scratch.keys.destroy();
     scratch.values.destroy();
