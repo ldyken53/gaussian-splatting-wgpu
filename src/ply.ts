@@ -90,7 +90,6 @@ export class PackedGaussians {
                 break;
             }
         }
-        console.log(plyArrayBuffer);
 
         const vertexByteOffset = headerText.indexOf('end_header') + 'end_header'.length + 1;
         const vertexData = new DataView(plyArrayBuffer, vertexByteOffset);
@@ -163,7 +162,6 @@ export class PackedGaussians {
     constructor(arrayBuffer: ArrayBuffer) {
         // decode the header
         const [vertexCount, propertyTypes, vertexData] = PackedGaussians.decodeHeader(arrayBuffer);
-        console.log(vertexData);
         this.numGaussians = vertexCount;
 
         // figure out the SH degree from the number of coefficients

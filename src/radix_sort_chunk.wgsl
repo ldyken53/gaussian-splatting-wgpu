@@ -13,7 +13,7 @@ var<workgroup> sorted_val_buf : array<u32, 256>;
 
 @compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>, @builtin(local_invocation_id) local_id : vec3<u32>) {
-    const UINT_MAX : u32 = 4294967295u;
+    const UINT_MAX : u32 = 4294967294u;
     // Also use the radix step to pad arrays out with UINT_MAX
     let item_idx : u32 = work_group_offset * 256 + global_id.x;
     if (item_idx < size) {
