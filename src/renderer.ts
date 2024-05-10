@@ -2,6 +2,8 @@ import { PackedGaussians } from './ply';
 import { f32, mat4x4 } from './packing';
 import { RadixSorter } from './radix_sort';
 import compute_depth from "./compute_depth.wgsl";
+import compute_tiles from "./compute_tiles.wgsl";
+import render from "./render.wgsl";
 
 const projMatrixLayout = new mat4x4(f32);
 
@@ -26,12 +28,16 @@ export class Renderer {
     canvasSizeBuffer: GPUBuffer;
     tileSizeBuffer: GPUBuffer;
 
-    uniformsBindGroup: GPUBindGroup;
+    renderTarget: GPUTexture;
+
+    renderPipelineBindGroup: GPUBindGroup;
     pointDataBindGroup: GPUBindGroup;
     computeDepthBindGroup: GPUBindGroup;
+    computeTilesBindGroup: GPUBindGroup;
 
-    drawPipeline: GPURenderPipeline;
+    renderPipeline: GPURenderPipeline;
     computeDepthPipeline: GPUComputePipeline;
+    computeTilesPipeline: GPUComputePipeline;
 
     depthSortMatrix: number[][];
 
@@ -67,12 +73,12 @@ export class Renderer {
 
         this.numGaussians = gaussians.numGaussians;
 
-        const presentationFormat = "rgba16float" as GPUTextureFormat;
+        const presentationFormat = "rgba8unorm" as GPUTextureFormat;
 
         this.contextGpu.configure({
             device: this.device,
             format: presentationFormat,
-            alphaMode: 'premultiplied' as GPUCanvasAlphaMode,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT
         });
 
         this.pointDataBuffer = this.device.createBuffer({
@@ -150,7 +156,7 @@ export class Renderer {
             2
         );
 
-        // buffer for the canvas size, set once, currently hardcoded
+        // buffer for the tile size, set once, currently hardcoded
         this.tileSizeBuffer = this.device.createBuffer({
             size: 1 * 4,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -173,7 +179,6 @@ export class Renderer {
                 entryPoint: "main",
             },
         });
-
         this.computeDepthBindGroup = this.device.createBindGroup({
             layout: this.computeDepthPipeline.getBindGroupLayout(0),
             entries: [
@@ -188,9 +193,57 @@ export class Renderer {
             ]
         });
 
+        this.renderTarget = this.device.createTexture({
+            size: [this.canvas.width, this.canvas.height, 1],
+            format: "rgba8unorm",
+            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING |
+                       GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
+        });
+        this.computeTilesPipeline = this.device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: this.device.createShaderModule({
+                    code: compute_tiles,
+                }),
+                entryPoint: "main",
+            },
+        });
+        this.computeTilesBindGroup = this.device.createBindGroup({
+            layout: this.computeTilesPipeline.getBindGroupLayout(0),
+            entries: [
+                {binding: 0, resource: this.renderTarget.createView()},
+                {binding: 1, resource: {buffer: this.canvasSizeBuffer}},
+            ]
+        });
+
+        let renderModule = this.device.createShaderModule({code: render});
+        this.renderPipeline = this.device.createRenderPipeline({
+            layout: "auto",
+            vertex: {
+                module: renderModule,
+                entryPoint: "vertex_main",
+            },
+            fragment: {
+                module: renderModule,
+                entryPoint: "fragment_main",
+                targets: [{format: presentationFormat}]
+            },
+        });
+        const sampler = device.createSampler({
+            magFilter: 'linear',
+            minFilter: 'linear',
+        });    
+        this.renderPipelineBindGroup = device.createBindGroup({
+            layout: this.renderPipeline.getBindGroupLayout(0),
+            entries: [
+                {binding: 0, resource: this.renderTarget.createView()},
+                {binding: 1, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 2, resource: sampler}
+            ]
+        });
+
         // start the animation loop
-        this.animate();
-        // requestAnimationFrame(async () => await this.animate(true));
+        requestAnimationFrame(() => this.animate());
     }
 
     private destroyImpl(): void {
@@ -298,11 +351,8 @@ export class Renderer {
         }
     }
 
-    draw(nextFrameCallback: FrameRequestCallback): void {
-        requestAnimationFrame(nextFrameCallback);
-    }
-
-    async animate(forceDraw?: boolean) {
+    async animate() {
+        console.log(this);
         if (this.destroyCallback !== null) {
             this.destroyImpl();
             return;
@@ -314,8 +364,41 @@ export class Renderer {
             [-0.8031625151634216, 0.6299861669540405, 5.257271766662598, 1]
         ]
         await this.sort(defaultCam);
-        
 
-        // this.draw(async () => await this.animate());
+        { 
+            const commandEncoder = this.device.createCommandEncoder();
+            const passEncoder = commandEncoder.beginComputePass();
+            passEncoder.setPipeline(this.computeTilesPipeline);
+            passEncoder.setBindGroup(0, this.computeTilesBindGroup);
+            passEncoder.dispatchWorkgroups(Math.ceil(this.canvas.width / 16), Math.ceil(this.canvas.height / 16));
+            passEncoder.end();
+
+            this.device.queue.submit([commandEncoder.finish()]);
+        }
+
+        { 
+            // Blit the image rendered onto the screen
+            const commandEncoder = this.device.createCommandEncoder();
+
+            const renderPassDesc = {
+                colorAttachments: [{
+                    view: this.contextGpu.getCurrentTexture().createView(),
+                    loadOp: "clear" as GPULoadOp,
+                    clearValue: [0.3, 0.3, 0.3, 1],
+                    storeOp: "store" as GPUStoreOp
+                }],
+            };
+            const renderPass = commandEncoder.beginRenderPass(renderPassDesc);
+
+            renderPass.setPipeline(this.renderPipeline);
+            renderPass.setBindGroup(0, this.renderPipelineBindGroup);
+
+            // Draw a full screen quad
+            renderPass.draw(6, 1, 0, 0);
+            renderPass.end();
+            this.device.queue.submit([commandEncoder.finish()]);
+        }
+
+        // requestAnimationFrame(() => this.animate());
     }
 }
