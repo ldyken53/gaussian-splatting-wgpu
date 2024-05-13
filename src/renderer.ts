@@ -3,6 +3,7 @@ import { f32, mat4x4 } from './packing';
 import { RadixSorter } from './radix_sort';
 import compute_depth from "./compute_depth.wgsl";
 import compute_tiles from "./compute_tiles.wgsl";
+import compute_ranges from "./compute_ranges.wgsl";
 import render from "./render.wgsl";
 
 const projMatrixLayout = new mat4x4(f32);
@@ -22,11 +23,13 @@ export class Renderer {
     projMatrixBuffer: GPUBuffer; // projection matrix, set at each frame
     depthBuffer: GPUBuffer; // depth values, computed each time using uniforms, padded to next power of 2
     indexBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by depth)
-    tileBuffer: GPUBuffer;
+    tileBuffer: GPUBuffer; // tile IDs for each gaussian
+    rangesBuffer: GPUBuffer; // tile ranges for each pixel, pixel index written with stopping point in sorted gaussian buffer
     positionsBuffer: GPUBuffer;
     numGaussianBuffer: GPUBuffer;
     canvasSizeBuffer: GPUBuffer;
     tileSizeBuffer: GPUBuffer;
+    numTilesBuffer: GPUBuffer;
 
     renderTarget: GPUTexture;
 
@@ -34,10 +37,12 @@ export class Renderer {
     pointDataBindGroup: GPUBindGroup;
     computeDepthBindGroup: GPUBindGroup;
     computeTilesBindGroup: GPUBindGroup;
+    computeRangesBindGroup: GPUBindGroup;
 
     renderPipeline: GPURenderPipeline;
     computeDepthPipeline: GPUComputePipeline;
     computeTilesPipeline: GPUComputePipeline;
+    computeRangesPipeline: GPUComputePipeline;
 
     depthSortMatrix: number[][];
 
@@ -121,6 +126,13 @@ export class Renderer {
             label: "renderer.tileBuffer"
         });
 
+        // buffer for the range of tiles for each pixel
+        this.rangesBuffer = this.device.createBuffer({
+            size: this.canvas.width  * this.canvas.height * 4 / (16 * 16), // u32
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+            label: "renderer.rangesBuffer"
+        });
+
         // buffer for the projection matrix, set at each frame
         this.projMatrixBuffer = this.device.createBuffer({
             size: projMatrixLayout.size,
@@ -170,6 +182,20 @@ export class Renderer {
             1
         );
 
+        // buffer for the num tiles, set once, currently hardcoded
+        this.numTilesBuffer = this.device.createBuffer({
+            size: 1 * 4,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+            label: "renderer.numTilesBuffer"
+        });
+        this.device.queue.writeBuffer(
+            this.numTilesBuffer,
+            0,
+            new Uint32Array([Math.ceil(this.canvas.width / 16) * Math.ceil(this.canvas.height / 16)]),
+            0,
+            1
+        );
+
         this.computeDepthPipeline = this.device.createComputePipeline({
             layout: "auto",
             compute: {
@@ -212,7 +238,27 @@ export class Renderer {
             layout: this.computeTilesPipeline.getBindGroupLayout(0),
             entries: [
                 {binding: 0, resource: this.renderTarget.createView()},
-                {binding: 1, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 1, resource: {buffer: this.rangesBuffer}},
+                {binding: 2, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 3, resource: {buffer: this.tileSizeBuffer}}
+            ]
+        });
+
+        this.computeRangesPipeline = this.device.createComputePipeline({
+            layout: "auto",
+            compute: {
+                module: this.device.createShaderModule({
+                    code: compute_ranges,
+                }),
+                entryPoint: "main",
+            },
+        });
+        this.computeRangesBindGroup = this.device.createBindGroup({
+            layout: this.computeRangesPipeline.getBindGroupLayout(0),
+            entries: [
+                {binding: 0, resource: {buffer: this.tileBuffer}},
+                {binding: 1, resource: {buffer: this.rangesBuffer}},
+                {binding: 2, resource: {buffer: this.numTilesBuffer}},
             ]
         });
 
@@ -280,21 +326,21 @@ export class Renderer {
             this.device.queue.submit([commandEncoder.finish()]);
         }
 
-        {
-            var dbgBuffer = this.device.createBuffer({
-                size: this.tileBuffer.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            });
+        // {
+            // var dbgBuffer = this.device.createBuffer({
+            //     size: this.tileBuffer.size,
+            //     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            // });
 
-            var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.tileBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            this.device.queue.submit([commandEncoder.finish()]);
-            await this.device.queue.onSubmittedWorkDone();
+            // var commandEncoder = this.device.createCommandEncoder();
+            // commandEncoder.copyBufferToBuffer(this.tileBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            // this.device.queue.submit([commandEncoder.finish()]);
+            // await this.device.queue.onSubmittedWorkDone();
 
-            await dbgBuffer.mapAsync(GPUMapMode.READ);
+            // await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-            var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
-            console.log(debugVals);
+            // var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
+            // console.log(debugVals);
             // var minX = 0, maxX = 0, minY = 0, maxY = 0;
             // for (var i = 0; i < debugVals.length; i++) {
             //     if (i % 2 == 0) {
@@ -315,24 +361,24 @@ export class Renderer {
             // }
             // console.log(minX, maxX);
             // console.log(minY, maxY);
-        }
+        // }
         await this.radixSorter.sort(this.tileBuffer, this.indexBuffer, this.numGaussians, false, false);
-        {
-            var dbgBuffer = this.device.createBuffer({
-                size: this.indexBuffer.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            });
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.indexBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
 
-            var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.indexBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            this.device.queue.submit([commandEncoder.finish()]);
-            await this.device.queue.onSubmittedWorkDone();
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.indexBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
 
-            await dbgBuffer.mapAsync(GPUMapMode.READ);
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-            var debugVals2 = new Uint32Array(dbgBuffer.getMappedRange());
-            console.log(debugVals2);
-        }
+        //     var debugVals2 = new Uint32Array(dbgBuffer.getMappedRange());
+        //     console.log(debugVals2);
+        // }
         {
             var dbgBuffer = this.device.createBuffer({
                 size: this.tileBuffer.size,
@@ -368,12 +414,40 @@ export class Renderer {
         { 
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
+            passEncoder.setPipeline(this.computeRangesPipeline);
+            passEncoder.setBindGroup(0, this.computeRangesBindGroup);
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 64));
+            passEncoder.end();
+
+            this.device.queue.submit([commandEncoder.finish()]);
+        }
+
+        { 
+            const commandEncoder = this.device.createCommandEncoder();
+            const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.computeTilesPipeline);
             passEncoder.setBindGroup(0, this.computeTilesBindGroup);
             passEncoder.dispatchWorkgroups(Math.ceil(this.canvas.width / 16), Math.ceil(this.canvas.height / 16));
             passEncoder.end();
 
             this.device.queue.submit([commandEncoder.finish()]);
+        }
+
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.rangesBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.rangesBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
+
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+            var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
+            console.log(debugVals);
         }
 
         { 

@@ -22,7 +22,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             let t = tile_size;
             let num_tiles = vec2<f32>(ceil(f32(canvas_size.x) / f32(tile_size)), ceil(f32(canvas_size.y) / f32(tile_size)));
-            tiles[global_id.x] = u32(proj_pos.x * num_tiles.x) + u32(proj_pos.y * num_tiles.y * num_tiles.x); 
+            tiles[global_id.x] = u32(proj_pos.x * num_tiles.x) + u32(floor(proj_pos.y * num_tiles.y) * num_tiles.x); 
         }
     }
 }
