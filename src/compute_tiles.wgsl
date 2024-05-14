@@ -107,7 +107,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(workgroup_
     }
     var end_index : u32 = ranges[tile_id];
     var color: vec3<f32> = vec3<f32>(0.0);
-    for (var i = start_index; i < end_index; i++) {
+    // TODO: only get first one for now using +10000
+    for (var i = start_index; i < end_index; i+=10000) {
         color = compute_color_from_sh(point_data[indices[i]].position, point_data[indices[i]].sh);
     }
     let color2 = vec2<f32>(w_id.xy) / vec2<f32>(canvas_size / tile_size);

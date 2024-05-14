@@ -401,20 +401,20 @@ export class Renderer {
         }
 
         {
-            var dbgBuffer = this.device.createBuffer({
-                size: this.depthBuffer.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            });
+            // var dbgBuffer = this.device.createBuffer({
+            //     size: this.depthBuffer.size,
+            //     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            // });
 
-            var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.depthBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            this.device.queue.submit([commandEncoder.finish()]);
-            await this.device.queue.onSubmittedWorkDone();
+            // var commandEncoder = this.device.createCommandEncoder();
+            // commandEncoder.copyBufferToBuffer(this.depthBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            // this.device.queue.submit([commandEncoder.finish()]);
+            // await this.device.queue.onSubmittedWorkDone();
 
-            await dbgBuffer.mapAsync(GPUMapMode.READ);
+            // await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-            var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
-            console.log(debugDepthVals);
+            // var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
+            // console.log(debugDepthVals);
             // var minX = 0, maxX = 0, minY = 0, maxY = 0;
             // for (var i = 0; i < debugVals.length; i++) {
             //     if (i % 2 == 0) {
@@ -469,6 +469,22 @@ export class Renderer {
             var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
             console.log(debugVals);
         }
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.depthBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
+
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.depthBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
+
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+        //     var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
+        //     console.log(debugDepthVals);
+        // }
     }
 
     async animate() {

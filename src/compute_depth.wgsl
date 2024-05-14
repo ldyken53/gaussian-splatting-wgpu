@@ -33,7 +33,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             let t = tile_size;
             let num_tiles = vec2<f32>(ceil(f32(canvas_size.x) / f32(tile_size)), ceil(f32(canvas_size.y) / f32(tile_size)));
-            tiles[global_id.x] = u32(proj_pos.x * num_tiles.x) + u32(floor(proj_pos.y * num_tiles.y) * num_tiles.x); 
+            let tile_id = u32(proj_pos.x * num_tiles.x) + u32(floor(proj_pos.y * num_tiles.y) * num_tiles.x);
+            // need to use tile id for more significant bits, and rounded depth for least significant for proper ordering
+            // TODO: Fix when this overflows for large number of tiles
+            // TODO: negative depths are clipped completely
+            // TODO: maybe need to divide by proj_pos.w?
+            var depth = proj_pos.z;
+            if (depth < 0) {
+                tiles[global_id.x] = 4294967294u;
+            } else {
+                // TODO: assumes depths are 0-9.99
+                depth = min(depth * 100, 999);
+                tiles[global_id.x] = tile_id * 1000 + u32(depth);
+            }
         }
     }
 }

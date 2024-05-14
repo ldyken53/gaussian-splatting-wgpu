@@ -11,15 +11,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (global_id.x == 0) {
         start_index = 0;
     } else {
-        start_index = tiles[global_id.x - 1];
+        start_index = tiles[global_id.x - 1] / 1000u;
     }
-    if (tiles[global_id.x] > start_index) {
-        for (var i : u32 = start_index; i < tiles[global_id.x]; i++) {
+    if (tiles[global_id.x] / 1000 > start_index) {
+        for (var i : u32 = start_index; i < tiles[global_id.x] / 1000u; i++) {
             ranges[i] = global_id.x;
         }
     }
     if (tiles[global_id.x + 1] == 4294967294u) {
-        for (var i = tiles[global_id.x]; i < num_tiles; i++) {
+        for (var i = tiles[global_id.x] / 1000u; i < num_tiles; i++) {
             ranges[i] = global_id.x + 1;
         }
     }
