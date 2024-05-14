@@ -1,12 +1,21 @@
 import { PackedGaussians } from './ply';
-import { f32, mat4x4 } from './packing';
+import { Struct, f32, mat4x4, vec3 } from './packing';
 import { RadixSorter } from './radix_sort';
 import compute_depth from "./compute_depth.wgsl";
 import compute_tiles from "./compute_tiles.wgsl";
 import compute_ranges from "./compute_ranges.wgsl";
 import render from "./render.wgsl";
 
-const projMatrixLayout = new mat4x4(f32);
+const uniformLayout = new Struct([
+    ['viewMatrix', new mat4x4(f32)],
+    ['projMatrix', new mat4x4(f32)],
+    ['cameraPosition', new vec3(f32)],
+    ['tanHalfFovX', f32],
+    ['tanHalfFovY', f32],
+    ['focalX', f32],
+    ['focalY', f32],
+    ['scaleModifier', f32],
+]);
 
 export class Renderer {
     canvas: HTMLCanvasElement;
@@ -17,10 +26,9 @@ export class Renderer {
 
     radixSorter: RadixSorter;
 
-    uniformBuffer: GPUBuffer;
+    uniformBuffer: GPUBuffer; // camera uniforms
     pointDataBuffer: GPUBuffer;
     drawIndexBuffer: GPUBuffer;
-    projMatrixBuffer: GPUBuffer; // projection matrix, set at each frame
     depthBuffer: GPUBuffer; // depth values, computed each time using uniforms, padded to next power of 2
     indexBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by depth)
     tileBuffer: GPUBuffer; // tile IDs for each gaussian
@@ -105,6 +113,7 @@ export class Renderer {
         new Uint8Array(this.positionsBuffer.getMappedRange()).set(new Uint8Array(gaussians.positionsBuffer));
         this.positionsBuffer.unmap();
         
+        
         // buffer for the depth values, computed each time using uniforms, padded to next power of 2
         this.depthBuffer = this.device.createBuffer({
             size: this.radixSorter.getAlignedSize(this.numGaussians) * 4, // f32
@@ -128,17 +137,90 @@ export class Renderer {
 
         // buffer for the range of tiles for each pixel
         this.rangesBuffer = this.device.createBuffer({
-            size: this.canvas.width  * this.canvas.height * 4 / (16 * 16), // u32
+            size: this.canvas.width  * this.canvas.height * 4 / (4 * 4), // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.rangesBuffer"
         });
 
-        // buffer for the projection matrix, set at each frame
-        this.projMatrixBuffer = this.device.createBuffer({
-            size: projMatrixLayout.size,
+        let uniforms = {
+            "viewMatrix": [
+                [
+                    0.9640601277351379,
+                    0.021361779421567917,
+                    0.2648240327835083,
+                    0
+                ],
+                [
+                    -0.0728282555937767,
+                    0.9798307418823242,
+                    0.18608540296554565,
+                    0
+                ],
+                [
+                    -0.25550761818885803,
+                    -0.1986841857433319,
+                    0.9461714625358582,
+                    0
+                ],
+                [
+                    -0.8031625151634216,
+                    0.6299861669540405,
+                    5.257271766662598,
+                    1
+                ]
+            ],
+            "projMatrix": [
+                [
+                    2.092801809310913,
+                    -0.04624200612306595,
+                    0.2653547525405884,
+                    0.2648240327835083
+                ],
+                [
+                    -0.15809710323810577,
+                    -2.121047019958496,
+                    0.18645831942558289,
+                    0.18608540296554565
+                ],
+                [
+                    -0.5546612739562988,
+                    0.4300931692123413,
+                    0.9480676054954529,
+                    0.9461714625358582
+                ],
+                [
+                    -1.743522047996521,
+                    -1.3637359142303467,
+                    5.06740665435791,
+                    5.257271766662598
+                ]
+            ],
+            "cameraPosition": [
+                -0.6314126253128052,
+                -1.6540743112564087,
+                -5.05432653427124
+            ],
+            "tanHalfFovX": 0.13491994581477185,
+            "tanHalfFovY": 0.13513134754703682,
+            "focalX": 2594.130896557771,
+            "focalY": 2590.0725949481944,
+            "scaleModifier": 0.2928870292887029
+        }
+        // create a GPU buffer for the uniform data.
+        this.uniformBuffer = this.device.createBuffer({
+            size: uniformLayout.size,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-            label: "renderer.projMatrixBuffer"
+            label: "renderer.uniformBuffer",
         });
+        let uniformsMatrixBuffer = new ArrayBuffer(this.uniformBuffer.size);
+        uniformLayout.pack(0, uniforms, new DataView(uniformsMatrixBuffer));
+        this.device.queue.writeBuffer(
+            this.uniformBuffer,
+            0,
+            uniformsMatrixBuffer,
+            0,
+            uniformsMatrixBuffer.byteLength
+        );
 
         // buffer for the num gaussians, set once
         this.numGaussianBuffer = this.device.createBuffer({
@@ -177,7 +259,7 @@ export class Renderer {
         this.device.queue.writeBuffer(
             this.tileSizeBuffer,
             0,
-            new Uint32Array([16]),
+            new Uint32Array([4]),
             0,
             1
         );
@@ -191,7 +273,7 @@ export class Renderer {
         this.device.queue.writeBuffer(
             this.numTilesBuffer,
             0,
-            new Uint32Array([Math.ceil(this.canvas.width / 16) * Math.ceil(this.canvas.height / 16)]),
+            new Uint32Array([Math.ceil(this.canvas.width / 4) * Math.ceil(this.canvas.height / 4)]),
             0,
             1
         );
@@ -212,7 +294,7 @@ export class Renderer {
                 {binding: 1, resource: {buffer: this.depthBuffer}},
                 {binding: 2, resource: {buffer: this.indexBuffer}},
                 {binding: 3, resource: {buffer: this.tileBuffer}},
-                {binding: 4, resource: {buffer: this.projMatrixBuffer}},
+                {binding: 4, resource: {buffer: this.uniformBuffer}},
                 {binding: 5, resource: {buffer: this.numGaussianBuffer}},
                 {binding: 6, resource: {buffer: this.canvasSizeBuffer}},
                 {binding: 7, resource: {buffer: this.tileSizeBuffer}}
@@ -239,8 +321,11 @@ export class Renderer {
             entries: [
                 {binding: 0, resource: this.renderTarget.createView()},
                 {binding: 1, resource: {buffer: this.rangesBuffer}},
-                {binding: 2, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 3, resource: {buffer: this.tileSizeBuffer}}
+                {binding: 2, resource: {buffer: this.indexBuffer}},
+                {binding: 3, resource: {buffer: this.pointDataBuffer}},
+                {binding: 4, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 5, resource: {buffer: this.tileSizeBuffer}},
+                {binding: 6, resource: {buffer: this.uniformBuffer}},
             ]
         });
 
@@ -303,18 +388,7 @@ export class Renderer {
         this.destroyCallback();
     }
 
-    async sort(projMatrix: number[][]) {
-        const projMatrixCpuBuffer = new ArrayBuffer(projMatrixLayout.size);
-        projMatrixLayout.pack(0, projMatrix, new DataView(projMatrixCpuBuffer));
-
-        this.device.queue.writeBuffer(
-            this.projMatrixBuffer,
-            0,
-            projMatrixCpuBuffer,
-            0,
-            projMatrixCpuBuffer.byteLength
-        );
-
+    async sort() {
         { // compute the depth of each vertex
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
@@ -326,21 +400,21 @@ export class Renderer {
             this.device.queue.submit([commandEncoder.finish()]);
         }
 
-        // {
-            // var dbgBuffer = this.device.createBuffer({
-            //     size: this.tileBuffer.size,
-            //     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            // });
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.depthBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
 
-            // var commandEncoder = this.device.createCommandEncoder();
-            // commandEncoder.copyBufferToBuffer(this.tileBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            // this.device.queue.submit([commandEncoder.finish()]);
-            // await this.device.queue.onSubmittedWorkDone();
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.depthBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
 
-            // await dbgBuffer.mapAsync(GPUMapMode.READ);
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-            // var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
-            // console.log(debugVals);
+            var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
+            console.log(debugDepthVals);
             // var minX = 0, maxX = 0, minY = 0, maxY = 0;
             // for (var i = 0; i < debugVals.length; i++) {
             //     if (i % 2 == 0) {
@@ -361,7 +435,7 @@ export class Renderer {
             // }
             // console.log(minX, maxX);
             // console.log(minY, maxY);
-        // }
+        }
         await this.radixSorter.sort(this.tileBuffer, this.indexBuffer, this.numGaussians, false, false);
         // {
         //     var dbgBuffer = this.device.createBuffer({
@@ -398,18 +472,11 @@ export class Renderer {
     }
 
     async animate() {
-        console.log(this);
         if (this.destroyCallback !== null) {
             this.destroyImpl();
             return;
         }
-        let defaultCam = [
-            [0.9640601277351379, 0.021361779421567917, 0.2648240327835083, -0],
-            [-0.0728282555937767, 0.9798307418823242, 0.18608540296554565, 0],
-            [-0.25550761818885803, -0.1986841857433319, 0.9461714625358582, 0],
-            [-0.8031625151634216, 0.6299861669540405, 5.257271766662598, 1]
-        ]
-        await this.sort(defaultCam);
+        await this.sort();
 
         { 
             const commandEncoder = this.device.createCommandEncoder();
@@ -427,7 +494,7 @@ export class Renderer {
             const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.computeTilesPipeline);
             passEncoder.setBindGroup(0, this.computeTilesBindGroup);
-            passEncoder.dispatchWorkgroups(Math.ceil(this.canvas.width / 16), Math.ceil(this.canvas.height / 16));
+            passEncoder.dispatchWorkgroups(Math.ceil(this.canvas.width / 4), Math.ceil(this.canvas.height / 4));
             passEncoder.end();
 
             this.device.queue.submit([commandEncoder.finish()]);

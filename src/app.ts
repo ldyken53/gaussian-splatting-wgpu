@@ -11,7 +11,13 @@ import { Renderer } from "./renderer";
 
     // Get a GPU device to render with
     let adapter = await navigator.gpu.requestAdapter();
-    let device = await adapter.requestDevice();
+    console.log(adapter.limits);
+    let device = await adapter.requestDevice({
+        requiredLimits: {
+            maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+            maxBufferSize: adapter.limits.maxBufferSize
+        }
+    });
 
     // Grab needed HTML elements
     const plyFileInput = document.getElementById('plyButton') as HTMLInputElement;
@@ -23,7 +29,6 @@ import { Renderer } from "./renderer";
     
         async function onFileLoad(arrayBuffer: ArrayBuffer) {
             const gaussians = new PackedGaussians(arrayBuffer);
-            console.log(gaussians);
             const renderer = new Renderer(canvas, device, gaussians);
             loadingPopup.style.display = 'none'; // hide loading popup
         }
