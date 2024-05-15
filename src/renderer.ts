@@ -20,6 +20,7 @@ const uniformLayout = new Struct([
 export class Renderer {
     canvas: HTMLCanvasElement;
     numGaussians: number;
+    tileSize: number;
 
     device: GPUDevice;
     contextGpu: GPUCanvasContext;
@@ -72,6 +73,8 @@ export class Renderer {
         device: GPUDevice,
         gaussians: PackedGaussians,
     ) {
+        // hardcoded for now
+        this.tileSize = 4;
         this.canvas = canvas;
         this.device = device;
         const contextGpu = canvas.getContext("webgpu");
@@ -137,7 +140,7 @@ export class Renderer {
 
         // buffer for the range of tiles for each pixel
         this.rangesBuffer = this.device.createBuffer({
-            size: this.canvas.width  * this.canvas.height * 4 / (4 * 4), // u32
+            size: this.canvas.width  * this.canvas.height * 4 / (this.tileSize * this.tileSize), // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.rangesBuffer"
         });
@@ -259,7 +262,7 @@ export class Renderer {
         this.device.queue.writeBuffer(
             this.tileSizeBuffer,
             0,
-            new Uint32Array([4]),
+            new Uint32Array([this.tileSize]),
             0,
             1
         );
@@ -273,7 +276,7 @@ export class Renderer {
         this.device.queue.writeBuffer(
             this.numTilesBuffer,
             0,
-            new Uint32Array([Math.ceil(this.canvas.width / 4) * Math.ceil(this.canvas.height / 4)]),
+            new Uint32Array([Math.ceil(this.canvas.width / this.tileSize) * Math.ceil(this.canvas.height / this.tileSize)]),
             0,
             1
         );
@@ -510,7 +513,7 @@ export class Renderer {
             const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.computeTilesPipeline);
             passEncoder.setBindGroup(0, this.computeTilesBindGroup);
-            passEncoder.dispatchWorkgroups(Math.ceil(this.canvas.width / 4), Math.ceil(this.canvas.height / 4));
+            passEncoder.dispatchWorkgroups(Math.ceil(this.canvas.width / this.tileSize), Math.ceil(this.canvas.height / this.tileSize));
             passEncoder.end();
 
             this.device.queue.submit([commandEncoder.finish()]);

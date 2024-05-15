@@ -25,8 +25,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         depths[global_id.x] = 1e20f; // pad with +inf
         tiles[global_id.x] = 4294967294u;
     } else {
-        let pos = vertices[global_id.x];
-        let proj_pos = uniforms.view_matrix * vec4<f32>(pos, 1.0);
+        let pos = vec4<f32>(vertices[global_id.x], 1.0f);
+        if (!in_frustum(pos)) {
+            depths[global_id.x] = 1e20f; // pad with +inf
+            tiles[global_id.x] = 4294967294u;
+            return;
+        }
+        let proj_pos = uniforms.view_matrix * pos;
+        // just for debugging if needed
         depths[global_id.x] = proj_pos.z;
         if (proj_pos.x < 0 || proj_pos.x >= 1 || proj_pos.y < 0 || proj_pos.y >= 1) {
             tiles[global_id.x] = 4294967294u;
@@ -48,4 +54,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
     }
+}
+
+fn in_frustum(world_pos: vec4<f32>) -> bool {
+  let p_hom = uniforms.proj_matrix * world_pos;
+  let p_w = 1.0f / (p_hom.w + 0.0000001f);
+
+  let p_proj = vec3(
+    p_hom.x * p_w,
+    p_hom.y * p_w,
+    p_hom.z * p_w
+  );
+
+  let p_view = uniforms.view_matrix * world_pos;
+  
+  if (p_view.z <= 0.2f || ((p_proj.x < -1.1 || p_proj.x > 1.1 || p_proj.y < -1.1 || p_proj.y > 1.1))) {
+    return false;
+  }
+
+  return true;
 }
