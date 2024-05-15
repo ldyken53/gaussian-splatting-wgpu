@@ -34,7 +34,6 @@ export class Renderer {
     indexBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by depth)
     tileBuffer: GPUBuffer; // tile IDs for each gaussian
     rangesBuffer: GPUBuffer; // tile ranges for each pixel, pixel index written with stopping point in sorted gaussian buffer
-    positionsBuffer: GPUBuffer;
     numGaussianBuffer: GPUBuffer;
     canvasSizeBuffer: GPUBuffer;
     tileSizeBuffer: GPUBuffer;
@@ -105,17 +104,6 @@ export class Renderer {
         });
         new Uint8Array(this.pointDataBuffer.getMappedRange()).set(new Uint8Array(gaussians.gaussiansBuffer));
         this.pointDataBuffer.unmap();
-
-        // buffer for the vertex positions, set once
-        this.positionsBuffer = this.device.createBuffer({
-            size: gaussians.positionsArrayLayout.size,
-            usage: GPUBufferUsage.STORAGE,
-            mappedAtCreation: true,
-            label: "renderer.positionsBuffer"
-        });
-        new Uint8Array(this.positionsBuffer.getMappedRange()).set(new Uint8Array(gaussians.positionsBuffer));
-        this.positionsBuffer.unmap();
-        
         
         // buffer for the depth values, computed each time using uniforms, padded to next power of 2
         this.depthBuffer = this.device.createBuffer({
@@ -293,7 +281,7 @@ export class Renderer {
         this.computeDepthBindGroup = this.device.createBindGroup({
             layout: this.computeDepthPipeline.getBindGroupLayout(0),
             entries: [
-                {binding: 0, resource: {buffer: this.positionsBuffer}},
+                {binding: 0, resource: {buffer: this.pointDataBuffer}},
                 {binding: 1, resource: {buffer: this.depthBuffer}},
                 {binding: 2, resource: {buffer: this.indexBuffer}},
                 {binding: 3, resource: {buffer: this.tileBuffer}},
@@ -404,20 +392,20 @@ export class Renderer {
         }
 
         {
-            // var dbgBuffer = this.device.createBuffer({
-            //     size: this.depthBuffer.size,
-            //     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            // });
+            var dbgBuffer = this.device.createBuffer({
+                size: this.depthBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
 
-            // var commandEncoder = this.device.createCommandEncoder();
-            // commandEncoder.copyBufferToBuffer(this.depthBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            // this.device.queue.submit([commandEncoder.finish()]);
-            // await this.device.queue.onSubmittedWorkDone();
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.depthBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
 
-            // await dbgBuffer.mapAsync(GPUMapMode.READ);
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-            // var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
-            // console.log(debugDepthVals);
+            var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
+            console.log(debugDepthVals);
             // var minX = 0, maxX = 0, minY = 0, maxY = 0;
             // for (var i = 0; i < debugVals.length; i++) {
             //     if (i % 2 == 0) {

@@ -26,7 +26,7 @@ fn vertex_main(@builtin(vertex_index) vertex_index : u32)
 
 @fragment
 fn fragment_main(@builtin(position) frag_coord : vec4<f32>) -> @location(0) vec4<f32> {
-    let color = textureSample(output_texture, u_sampler, frag_coord.xy / vec2<f32>(f32(canvas_size.x), f32(canvas_size.y)));
+    let color = textureSample(output_texture, u_sampler, vec2<f32>(frag_coord.x / f32(canvas_size.x), (frag_coord.y / f32(canvas_size.y)) * -1.0 + 1.0));
     return color;
 }
 
