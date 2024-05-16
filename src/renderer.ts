@@ -29,6 +29,7 @@ export class Renderer {
 
     uniformBuffer: GPUBuffer; // camera uniforms
     pointDataBuffer: GPUBuffer;
+    gaussianDataBuffer: GPUBuffer;
     drawIndexBuffer: GPUBuffer;
     depthBuffer: GPUBuffer; // depth values, computed each time using uniforms, padded to next power of 2
     indexBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by depth)
@@ -73,7 +74,7 @@ export class Renderer {
         gaussians: PackedGaussians,
     ) {
         // hardcoded for now
-        this.tileSize = 4;
+        this.tileSize = 16;
         this.canvas = canvas;
         this.device = device;
         const contextGpu = canvas.getContext("webgpu");
@@ -131,6 +132,13 @@ export class Renderer {
             size: this.canvas.width  * this.canvas.height * 4 / (this.tileSize * this.tileSize), // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.rangesBuffer"
+        });
+
+        // buffer for gaussian info needed for computing tiles
+        this.gaussianDataBuffer = this.device.createBuffer({
+            size: this.numGaussians * (2 + 4 + 4 + 1) * 4, // vec2, vec3, vec3, f32
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+            label: "renderer.gaussianDataBuffer"
         });
 
         let uniforms = {
@@ -282,13 +290,14 @@ export class Renderer {
             layout: this.computeDepthPipeline.getBindGroupLayout(0),
             entries: [
                 {binding: 0, resource: {buffer: this.pointDataBuffer}},
-                {binding: 1, resource: {buffer: this.depthBuffer}},
-                {binding: 2, resource: {buffer: this.indexBuffer}},
-                {binding: 3, resource: {buffer: this.tileBuffer}},
-                {binding: 4, resource: {buffer: this.uniformBuffer}},
-                {binding: 5, resource: {buffer: this.numGaussianBuffer}},
-                {binding: 6, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 7, resource: {buffer: this.tileSizeBuffer}}
+                {binding: 1, resource: {buffer: this.gaussianDataBuffer}},
+                {binding: 2, resource: {buffer: this.depthBuffer}},
+                {binding: 3, resource: {buffer: this.indexBuffer}},
+                {binding: 4, resource: {buffer: this.tileBuffer}},
+                {binding: 5, resource: {buffer: this.uniformBuffer}},
+                {binding: 6, resource: {buffer: this.numGaussianBuffer}},
+                {binding: 7, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 8, resource: {buffer: this.tileSizeBuffer}}
             ]
         });
 
@@ -313,7 +322,7 @@ export class Renderer {
                 {binding: 0, resource: this.renderTarget.createView()},
                 {binding: 1, resource: {buffer: this.rangesBuffer}},
                 {binding: 2, resource: {buffer: this.indexBuffer}},
-                {binding: 3, resource: {buffer: this.pointDataBuffer}},
+                {binding: 3, resource: {buffer: this.gaussianDataBuffer}},
                 {binding: 4, resource: {buffer: this.canvasSizeBuffer}},
                 {binding: 5, resource: {buffer: this.tileSizeBuffer}},
                 {binding: 6, resource: {buffer: this.uniformBuffer}},
@@ -393,12 +402,12 @@ export class Renderer {
 
         {
             var dbgBuffer = this.device.createBuffer({
-                size: this.depthBuffer.size,
+                size: this.gaussianDataBuffer.size,
                 usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
             });
 
             var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.depthBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            commandEncoder.copyBufferToBuffer(this.gaussianDataBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
 

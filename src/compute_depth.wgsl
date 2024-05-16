@@ -5,6 +5,12 @@ struct PointInput {
     @location(3) opacity_logit: f32,
     sh: array<vec3<f32>, 16>,
 };
+struct GaussianData {
+    uv: vec2<f32>,
+    conic: vec3<f32>,
+    color: vec3<f32>,
+    opacity: f32,
+}
 struct Uniforms {
     view_matrix: mat4x4<f32>,
     proj_matrix: mat4x4<f32>,
@@ -17,13 +23,14 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var<storage, read> point_data: array<PointInput>;
-@group(0) @binding(1) var<storage, read_write> depths: array<f32>;
-@group(0) @binding(2) var<storage, read_write> indices: array<u32>;
-@group(0) @binding(3) var<storage, read_write> tiles: array<u32>;
-@group(0) @binding(4) var<uniform> uniforms: Uniforms;
-@group(0) @binding(5) var<uniform> n_unpadded: u32;
-@group(0) @binding(6) var<uniform> canvas_size: vec2<u32>;
-@group(0) @binding(7) var<uniform> tile_size: u32;
+@group(0) @binding(1) var<storage, read_write> gaussian_data: array<GaussianData>;
+@group(0) @binding(2) var<storage, read_write> depths: array<f32>;
+@group(0) @binding(3) var<storage, read_write> indices: array<u32>;
+@group(0) @binding(4) var<storage, read_write> tiles: array<u32>;
+@group(0) @binding(5) var<uniform> uniforms: Uniforms;
+@group(0) @binding(6) var<uniform> n_unpadded: u32;
+@group(0) @binding(7) var<uniform> canvas_size: vec2<u32>;
+@group(0) @binding(8) var<uniform> tile_size: u32;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -85,6 +92,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // TODO: assumes depths are 0-9.99
         depth = min(depth * 100, 999);
         tiles[global_id.x] = tile_id * 1000 + u32(depth);
+
+        let color = compute_color_from_sh(pos.xyz, gaussian.sh);
+        let opacity = sigmoid(gaussian.opacity_logit);
+        // save data so it doesn't have to be recomputed when computing tiles
+        gaussian_data[global_id.x] = GaussianData(
+            point_uv,
+            conic,
+            color,
+            opacity
+        );
     }
 }
 
@@ -198,4 +215,80 @@ fn compute_cov2d(position: vec3<f32>, log_scale: vec3<f32>, rot: vec4<f32>) -> v
 
 
   return vec3(cov[0][0], cov[0][1], cov[1][1]);
+}
+
+// spherical harmonic coefficients
+const SH_C0 = 0.28209479177387814f;
+const SH_C1 = 0.4886025119029199f;
+const SH_C2 = array(
+    1.0925484305920792f,
+    -1.0925484305920792f,
+    0.31539156525252005f,
+    -1.0925484305920792f,
+    0.5462742152960396f
+);
+const SH_C3 = array(
+    -0.5900435899266435f,
+    2.890611442640554f,
+    -0.4570457994644658f,
+    0.3731763325901154f,
+    -0.4570457994644658f,
+    1.445305721320277f,
+    -0.5900435899266435f
+);
+
+fn compute_color_from_sh(position: vec3<f32>, sh: array<vec3<f32>, 16>) -> vec3<f32> {
+    let dir = normalize(position - uniforms.camera_position);
+    var result = SH_C0 * sh[0];
+
+    // // if deg > 0
+    // let x = dir.x;
+    // let y = dir.y;
+    // let z = dir.z;
+
+    // result = result + SH_C1 * (-y * sh[1] + z * sh[2] - x * sh[3]);
+
+    // let xx = x * x;
+    // let yy = y * y;
+    // let zz = z * z;
+    // let xy = x * y;
+    // let xz = x * z;
+    // let yz = y * z;
+
+    // // if (sh_degree > 1) {
+    // result = result +
+    //     SH_C2[0] * xy * sh[4] +
+    //     SH_C2[1] * yz * sh[5] +
+    //     SH_C2[2] * (2. * zz - xx - yy) * sh[6] +
+    //     SH_C2[3] * xz * sh[7] +
+    //     SH_C2[4] * (xx - yy) * sh[8];
+    
+    // // if (sh_degree > 2) {
+    // result = result +
+    //     SH_C3[0] * y * (3. * xx - yy) * sh[9] +
+    //     SH_C3[1] * xy * z * sh[10] +
+    //     SH_C3[2] * y * (4. * zz - xx - yy) * sh[11] +
+    //     SH_C3[3] * z * (2. * zz - 3. * xx - 3. * yy) * sh[12] +
+    //     SH_C3[4] * x * (4. * zz - xx - yy) * sh[13] +
+    //     SH_C3[5] * z * (xx - yy) * sh[14] +
+    //     SH_C3[6] * x * (xx - 3. * yy) * sh[15];
+
+    // unconditional
+    result = result + 0.5;
+
+    return max(result, vec3<f32>(0.));
+}
+
+fn sigmoid(x: f32) -> f32 {
+  // if (x >= 0.) {
+  //   return 1. / (1. + exp(-x));
+  // } else {
+  //   let z = exp(x);
+  //   return z / (1. + z);
+  // }
+
+  let z = exp(x);
+  let condition = f32(x >= 0.);
+
+  return (condition * (1. / (1. + exp(-x)))) + ((1.0 - condition) * (z / (1. + z)));
 }
