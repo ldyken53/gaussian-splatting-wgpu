@@ -21,6 +21,7 @@ export class Renderer {
     canvas: HTMLCanvasElement;
     numGaussians: number;
     tileSize: number;
+    numIntersections: number;
 
     device: GPUDevice;
     contextGpu: GPUCanvasContext;
@@ -74,8 +75,8 @@ export class Renderer {
         gaussians: PackedGaussians,
         tileSize: number
     ) {
-        // hardcoded for now
         this.tileSize = tileSize;
+        this.numIntersections = 22;
         this.canvas = canvas;
         this.device = device;
         const contextGpu = canvas.getContext("webgpu");
@@ -116,14 +117,14 @@ export class Renderer {
 
         // buffer for the index values, computed each time using uniforms, padded to next power of 2
         this.indexBuffer = this.device.createBuffer({
-            size: this.radixSorter.getAlignedSize(this.numGaussians) * 4, // f32
+            size: this.radixSorter.getAlignedSize(this.numGaussians * this.numIntersections) * 4, // f32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.indexBuffer"
         });
 
-        // buffer for the screen space xy values
+        // buffer for the tile key for each gaussian
         this.tileBuffer = this.device.createBuffer({
-            size: this.radixSorter.getAlignedSize(this.numGaussians) * 4, // u32
+            size: this.radixSorter.getAlignedSize(this.numGaussians * this.numIntersections) * 4, // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.tileBuffer"
         });
@@ -137,7 +138,7 @@ export class Renderer {
 
         // buffer for gaussian info needed for computing tiles
         this.gaussianDataBuffer = this.device.createBuffer({
-            size: this.numGaussians * (2 + 4 + 4 + 1) * 4, // vec2, vec3, vec3, f32
+            size: this.numGaussians * (12) * 4, // vec2, vec3, vec3, f32, weird alignment rules
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
             label: "renderer.gaussianDataBuffer"
         });
@@ -403,18 +404,18 @@ export class Renderer {
 
         {
             var dbgBuffer = this.device.createBuffer({
-                size: this.gaussianDataBuffer.size,
+                size: this.tileBuffer.size,
                 usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
             });
 
             var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.gaussianDataBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            commandEncoder.copyBufferToBuffer(this.tileBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
 
             await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-            var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
+            var debugDepthVals = new Uint32Array(dbgBuffer.getMappedRange());
             console.log(debugDepthVals);
             // var minX = 0, maxX = 0, minY = 0, maxY = 0;
             // for (var i = 0; i < debugVals.length; i++) {
@@ -437,23 +438,23 @@ export class Renderer {
             // console.log(minX, maxX);
             // console.log(minY, maxY);
         }
-        await this.radixSorter.sort(this.tileBuffer, this.indexBuffer, this.numGaussians, false, false);
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.indexBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
+        await this.radixSorter.sort(this.tileBuffer, this.indexBuffer, this.numGaussians * this.numIntersections, false, false);
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.indexBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
 
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.indexBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.indexBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
 
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-        //     var debugVals2 = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(debugVals2);
-        // }
+            var debugVals2 = new Uint32Array(dbgBuffer.getMappedRange());
+            console.log(debugVals2);
+        }
         {
             var dbgBuffer = this.device.createBuffer({
                 size: this.tileBuffer.size,
@@ -500,7 +501,7 @@ export class Renderer {
             const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.computeRangesPipeline);
             passEncoder.setBindGroup(0, this.computeRangesBindGroup);
-            passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 64));
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians * this.numIntersections / 256));
             passEncoder.end();
 
             this.device.queue.submit([commandEncoder.finish()]);

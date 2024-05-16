@@ -34,10 +34,15 @@ struct Uniforms {
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    indices[global_id.x] = global_id.x;
+    const n_ints : u32 = 22;
+    for (var i : u32 = 0; i < n_ints; i++) {
+        indices[global_id.x * n_ints + i] = global_id.x;
+    }
     if (global_id.x >= n_unpadded) {
         depths[global_id.x] = 1e20f; // pad with +inf
-        tiles[global_id.x] = 4294967294u;
+        for (var i : u32 = 0; i < n_ints; i++) {
+            tiles[global_id.x * n_ints + i] = 4294967294u;
+        }
     } else {
         let gaussian = point_data[global_id.x];
         let pos = vec4<f32>(gaussian.position, 1.0f);
@@ -45,7 +50,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // exit if gaussian outside frustum (depth < 0.2 or x, y < -1 or x, y > 1)
         if (!in_frustum(pos)) {
             depths[global_id.x] = 1e20f;
-            tiles[global_id.x] = 4294967294u;
+            for (var i : u32 = 0; i < n_ints; i++) {
+                tiles[global_id.x * n_ints + i] = 4294967294u;
+            }
             return;
         }
 
@@ -63,7 +70,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let det = cov_2d.x * cov_2d.z - cov_2d.y * cov_2d.y;
         // TODO: test if this is needed
         if (det == 0.0f) {
-            tiles[global_id.x] = 4294967294u;
+            for (var i : u32 = 0; i < n_ints; i++) {
+                tiles[global_id.x * n_ints + i] = 4294967294u;
+            }
             return;
         }        
         let det_inv = 1.0 / det;
@@ -79,19 +88,39 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let mid = 0.5 * (cov_2d.x + cov_2d.z);
         let lambda_1 = mid + sqrt(max(0.1, mid * mid - det));
         let lambda_2 = mid - sqrt(max(0.1, mid * mid - det));
-        let radius_px: i32 = i32(ceil(3. * sqrt(max(lambda_1, lambda_2))));
+        let radius = ceil(3. * sqrt(max(lambda_1, lambda_2)));
 
-        let t = tile_size;
         let num_tiles = vec2<f32>(ceil(f32(canvas_size.x) / f32(tile_size)), ceil(f32(canvas_size.y) / f32(tile_size)));
-        let tile_id = u32(point_uv.x * num_tiles.x) + u32(floor(point_uv.y * num_tiles.y) * num_tiles.x);
+        let rect = getRect(
+            point_uv,
+            radius,
+            canvas_size,
+            num_tiles
+        );
+
         // need to use tile id for more significant bits, and rounded depth for least significant for proper ordering
-        // TODO: Fix when this overflows for large number of tiles
-        // TODO: depths < 0.2 are clipped completely for frustrum culling
-        // TODO: maybe need to divide by proj_pos.w?
         var depth = view_pos.z;
         // TODO: assumes depths are 0-9.99
         depth = min(depth * 100, 999);
-        tiles[global_id.x] = tile_id * 1000 + u32(depth);
+        var tiles_touched : u32 = 0;
+        for (var y = rect.y; y < rect.w; y++) {
+            for (var x = rect.x; x < rect.z; x++) {
+                if (tiles_touched < n_ints) {
+                    let tile_id = y * u32(num_tiles.x) + x;
+                    // TODO: Fix when this overflows for large number of tiles
+                    tiles[global_id.x * n_ints + tiles_touched] = tile_id * 1000 + u32(depth);
+                    tiles_touched++;
+                }
+            }
+        }
+        // pad out the rest of allocated space
+        for (var i : u32 = tiles_touched; i < n_ints; i++) {
+            tiles[global_id.x * n_ints + i] = 4294967294u;
+        }
+
+        // writing tile_id just for the gaussian mean position
+        // let tile_id = u32(point_uv.x * num_tiles.x) + u32(floor(point_uv.y * num_tiles.y) * num_tiles.x);
+        // tiles[global_id.x] = tile_id * 1000 + u32(depth);
 
         let color = compute_color_from_sh(pos.xyz, gaussian.sh);
         let opacity = sigmoid(gaussian.opacity_logit);
@@ -291,4 +320,29 @@ fn sigmoid(x: f32) -> f32 {
   let condition = f32(x >= 0.);
 
   return (condition * (1. / (1. + exp(-x)))) + ((1.0 - condition) * (z / (1. + z)));
+}
+
+// TODO: Fix issue with last tile being full of intersecitons
+fn getRect(uv: vec2<f32>, max_radius: f32, grid: vec2<u32>, num_tiles: vec2<f32>) -> vec4<u32> {
+  let p: vec2<f32> = uv * vec2(f32(grid.x), f32(grid.y));
+  let t_s = i32(tile_size);
+
+  var rect_min: vec2<u32>;
+  var rect_max: vec2<u32>;
+
+  // Calculate rect_min
+  let min_x = min(i32(num_tiles.x), max(0, i32(p.x - max_radius) / t_s));
+  rect_min.x = u32(min_x);
+
+  let min_y = min(i32(num_tiles.y), max(0, i32(p.y - max_radius) / t_s));
+  rect_min.y = u32(min_y);
+
+  // Calculate rect_max
+  let max_x = min(i32(num_tiles.x), max(0, i32(p.x + max_radius) / t_s)) + 1;
+  rect_max.x = u32(max_x);
+
+  let max_y = min(i32(num_tiles.y), max(0, i32(p.y + max_radius)/ t_s)) + 1;
+  rect_max.y = u32(i32(max_y));
+
+  return vec4<u32>(rect_min, rect_max);
 }

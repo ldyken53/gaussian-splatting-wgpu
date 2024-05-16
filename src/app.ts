@@ -23,6 +23,7 @@ import { Renderer } from "./renderer";
     const plyFileInput = document.getElementById('plyButton') as HTMLInputElement;
     const loadingPopup = document.getElementById('loading-popup')! as HTMLDivElement;
     const tileSizeSlider = document.getElementById('tileSize') as HTMLInputElement;
+    tileSizeSlider.value = "16";
     let canvas = document.getElementById("webgpu-canvas") as HTMLCanvasElement;
 
     function handlePlyChange(event: any) {

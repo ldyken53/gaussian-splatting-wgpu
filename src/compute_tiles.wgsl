@@ -57,6 +57,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(workgroup_
         accumulated_color += condition * gaussian.color * alpha * t_i;
         t_i = condition * test_t + (1.0 - condition) * t_i;
     }
+    // accumulated_color = vec3<f32>(f32(end_index - start_index) / 1000);
+    // accumulated_color = vec3<f32>(f32(global_id.x) / f32(canvas_size.x), f32(global_id.y) / f32(canvas_size.y), 0);
+    // let num_tiles = vec2<f32>(ceil(f32(canvas_size.x) / f32(tile_size)), ceil(f32(canvas_size.y) / f32(tile_size)));
+    // accumulated_color = vec3<f32>(f32(end_index - start_index) / 100, f32(end_index - start_index) / 100, 0.0);
     textureStore(render_target, global_id.xy, vec4<f32>(accumulated_color.x, accumulated_color.y, accumulated_color.z, 1.0f));
     // just to keep uniforms active for now
     let color2 = vec2<f32>(w_id.xy) / vec2<f32>(canvas_size / tile_size);
