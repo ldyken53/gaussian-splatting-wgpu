@@ -72,9 +72,10 @@ export class Renderer {
         canvas: HTMLCanvasElement,
         device: GPUDevice,
         gaussians: PackedGaussians,
+        tileSize: number
     ) {
         // hardcoded for now
-        this.tileSize = 16;
+        this.tileSize = tileSize;
         this.canvas = canvas;
         this.device = device;
         const contextGpu = canvas.getContext("webgpu");
@@ -311,7 +312,7 @@ export class Renderer {
             layout: "auto",
             compute: {
                 module: this.device.createShaderModule({
-                    code: compute_tiles,
+                    code: compute_tiles.replace(/TILE_SIZE_MACRO/g, String(this.tileSize)),
                 }),
                 entryPoint: "main",
             },

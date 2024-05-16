@@ -16,7 +16,15 @@
             <div style="display: none" id="loading-popup">Loading .ply, this may take from seconds to a couple of minutes</div>
             <div class="col-12 text-center">
                 <h4>WebGPU Webpack + TypeScript Starter</h4>
-                <canvas id="webgpu-canvas" class="img-fluid" width="800" height="800"></canvas>
+                <canvas id="webgpu-canvas" class="img-fluid" width="1280" height="720"></canvas>
+                <select name="tileSize" id="tileSize">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="4">4</option>
+                    <option value="8">8</option>
+                    <option value="16">16</option>
+                  </select>
+                <label for="tileSize">Tile Size</label>
                 <div class="col-12 alert alert-danger" id="no-webgpu" style="display:none;">
                     <h4>Error: Your browser does not support WebGPU</h4>
                     <p>You can find out how to get access to it in Chrome Canary

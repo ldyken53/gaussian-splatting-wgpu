@@ -25,7 +25,7 @@ struct Uniforms {
 @group(0) @binding(6) var<uniform> uniforms: Uniforms;
 
 // the workgroup size needs to be the tile size
-@compute @workgroup_size(16, 16)
+@compute @workgroup_size(TILE_SIZE_MACRO, TILE_SIZE_MACRO)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(workgroup_id) w_id: vec3<u32>, @builtin(num_workgroups) n_wgs: vec3<u32>) {
     if (global_id.x > canvas_size.x || global_id.y > canvas_size.y) {
         return;

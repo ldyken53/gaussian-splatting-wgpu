@@ -22,6 +22,7 @@ import { Renderer } from "./renderer";
     // Grab needed HTML elements
     const plyFileInput = document.getElementById('plyButton') as HTMLInputElement;
     const loadingPopup = document.getElementById('loading-popup')! as HTMLDivElement;
+    const tileSizeSlider = document.getElementById('tileSize') as HTMLInputElement;
     let canvas = document.getElementById("webgpu-canvas") as HTMLCanvasElement;
 
     function handlePlyChange(event: any) {
@@ -29,7 +30,7 @@ import { Renderer } from "./renderer";
     
         async function onFileLoad(arrayBuffer: ArrayBuffer) {
             const gaussians = new PackedGaussians(arrayBuffer);
-            const renderer = new Renderer(canvas, device, gaussians);
+            const renderer = new Renderer(canvas, device, gaussians, parseInt(tileSizeSlider.value));
             loadingPopup.style.display = 'none'; // hide loading popup
         }
     
