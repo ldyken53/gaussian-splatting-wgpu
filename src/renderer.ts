@@ -1,6 +1,7 @@
 import { PackedGaussians } from './ply';
 import { Struct, f32, mat4x4, vec3 } from './packing';
 import { RadixSorter } from './radix_sort';
+import { ExclusiveScanPipeline, ExclusiveScanner } from './exclusive_scan';
 import compute_depth from "./compute_depth.wgsl";
 import compute_tiles from "./compute_tiles.wgsl";
 import compute_ranges from "./compute_ranges.wgsl";
@@ -27,13 +28,17 @@ export class Renderer {
     contextGpu: GPUCanvasContext;
 
     radixSorter: RadixSorter;
+    scanPipeline: ExclusiveScanPipeline;
+    scanTileCounts: ExclusiveScanner;
 
     uniformBuffer: GPUBuffer; // camera uniforms
     pointDataBuffer: GPUBuffer;
     gaussianDataBuffer: GPUBuffer;
     drawIndexBuffer: GPUBuffer;
     depthBuffer: GPUBuffer; // depth values, computed each time using uniforms, padded to next power of 2
-    indexBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by depth)
+    indexBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by tile and depth)
+    tileCountBuffer: GPUBuffer; // used to count the number of tile intersections for each Gaussian
+    tileOffsetBuffer: GPUBuffer; // filled with output of prefix sum on tileCountBuffer
     tileBuffer: GPUBuffer; // tile IDs for each gaussian
     rangesBuffer: GPUBuffer; // tile ranges for each pixel, pixel index written with stopping point in sorted gaussian buffer
     numGaussianBuffer: GPUBuffer;
@@ -86,6 +91,7 @@ export class Renderer {
         this.contextGpu = contextGpu;
 
         this.radixSorter = new RadixSorter(this.device);
+        this.scanPipeline = new ExclusiveScanPipeline(this.device);
 
         this.lastDraw = performance.now();
 
@@ -121,6 +127,22 @@ export class Renderer {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.indexBuffer"
         });
+
+        this.tileCountBuffer = this.device.createBuffer({
+            size: this.numGaussians * 4, // u32
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+            label: "renderer.tileCountBuffer"
+        });
+
+        this.tileOffsetBuffer = this.device.createBuffer({
+            size: this.scanPipeline.getAlignedSize(this.numGaussians) * 4, // u32
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+            label: "renderer.tileOffsetBuffer"
+        });
+
+        this.scanTileCounts = this.scanPipeline.prepareGPUInput(
+            this.tileOffsetBuffer,
+            this.scanPipeline.getAlignedSize(this.numGaussians));
 
         // buffer for the tile key for each gaussian
         this.tileBuffer = this.device.createBuffer({
@@ -296,10 +318,11 @@ export class Renderer {
                 {binding: 2, resource: {buffer: this.depthBuffer}},
                 {binding: 3, resource: {buffer: this.indexBuffer}},
                 {binding: 4, resource: {buffer: this.tileBuffer}},
-                {binding: 5, resource: {buffer: this.uniformBuffer}},
-                {binding: 6, resource: {buffer: this.numGaussianBuffer}},
-                {binding: 7, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 8, resource: {buffer: this.tileSizeBuffer}}
+                {binding: 5, resource: {buffer: this.tileCountBuffer}},
+                {binding: 6, resource: {buffer: this.uniformBuffer}},
+                {binding: 7, resource: {buffer: this.numGaussianBuffer}},
+                {binding: 8, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 9, resource: {buffer: this.tileSizeBuffer}}
             ]
         });
 
@@ -438,6 +461,49 @@ export class Renderer {
             // console.log(minX, maxX);
             // console.log(minY, maxY);
         }
+        var commandEncoder = this.device.createCommandEncoder();
+        // We scan the tileOffsetBuffer, so copy the tile count information over
+        commandEncoder.copyBufferToBuffer(this.tileCountBuffer,
+            0,
+            this.tileOffsetBuffer,
+            0,
+            this.numGaussians * 4);
+        this.device.queue.submit([commandEncoder.finish()]);
+        var nintersections = await this.scanTileCounts.scan(this.numGaussians);
+        console.log(`Found ${nintersections} intersections`);
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.tileCountBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.tileCountBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
+
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+            var tileCountVals = new Uint32Array(dbgBuffer.getMappedRange());
+            console.log(tileCountVals);
+        }
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.tileOffsetBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.tileOffsetBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
+
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+            var tileCountVals = new Uint32Array(dbgBuffer.getMappedRange());
+            console.log(tileCountVals);
+        }
+
         await this.radixSorter.sort(this.tileBuffer, this.indexBuffer, this.numGaussians * this.numIntersections, false, false);
         {
             var dbgBuffer = this.device.createBuffer({

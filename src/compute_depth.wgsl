@@ -27,10 +27,11 @@ struct Uniforms {
 @group(0) @binding(2) var<storage, read_write> depths: array<f32>;
 @group(0) @binding(3) var<storage, read_write> indices: array<u32>;
 @group(0) @binding(4) var<storage, read_write> tiles: array<u32>;
-@group(0) @binding(5) var<uniform> uniforms: Uniforms;
-@group(0) @binding(6) var<uniform> n_unpadded: u32;
-@group(0) @binding(7) var<uniform> canvas_size: vec2<u32>;
-@group(0) @binding(8) var<uniform> tile_size: u32;
+@group(0) @binding(5) var<storage, read_write> tile_counts: array<u32>;
+@group(0) @binding(6) var<uniform> uniforms: Uniforms;
+@group(0) @binding(7) var<uniform> n_unpadded: u32;
+@group(0) @binding(8) var<uniform> canvas_size: vec2<u32>;
+@group(0) @binding(9) var<uniform> tile_size: u32;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -97,6 +98,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             canvas_size,
             num_tiles
         );
+        tile_counts[global_id.x] = (rect.w - rect.y) * (rect.z - rect.x);
 
         // need to use tile id for more significant bits, and rounded depth for least significant for proper ordering
         var depth = view_pos.z;
