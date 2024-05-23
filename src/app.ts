@@ -15,7 +15,7 @@ import { Renderer } from "./renderer";
     let device = await adapter.requestDevice({
         requiredLimits: {
             maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
-            maxBufferSize: adapter.limits.maxBufferSize
+            maxBufferSize: adapter.limits.maxBufferSize,
         }
     });
 

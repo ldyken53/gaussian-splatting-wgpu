@@ -585,7 +585,8 @@ export class Renderer {
             const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.computeRangesPipeline);
             passEncoder.setBindGroup(0, this.computeRangesBindGroup);
-            passEncoder.dispatchWorkgroups(Math.ceil(this.numIntersections / 256));
+            // workgroup is 256 and each thread does 64 elements
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numIntersections / (256 * 64)));
             passEncoder.end();
 
             this.device.queue.submit([commandEncoder.finish()]);
