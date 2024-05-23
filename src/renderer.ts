@@ -1,7 +1,11 @@
+import { Mat4 } from 'wgpu-matrix';
+
 import { PackedGaussians } from './ply';
 import { Struct, f32, mat4x4, vec3 } from './packing';
 import { RadixSorter } from './radix_sort';
 import { ExclusiveScanPipeline, ExclusiveScanner } from './exclusive_scan';
+import { InteractiveCamera } from './camera';
+
 import compute_depth from "./compute_depth.wgsl";
 import compute_tiles from "./compute_tiles.wgsl";
 import compute_ranges from "./compute_ranges.wgsl";
@@ -19,8 +23,20 @@ const uniformLayout = new Struct([
     ['scaleModifier', f32],
 ]);
 
+function mat4toArrayOfArrays(m: Mat4): number[][] {
+    return [
+        [m[0], m[1], m[2], m[3]],
+        [m[4], m[5], m[6], m[7]],
+        [m[8], m[9], m[10], m[11]],
+        [m[12], m[13], m[14], m[15]],
+    ];
+}
+
 export class Renderer {
     canvas: HTMLCanvasElement;
+    interactiveCamera: InteractiveCamera;
+    firstPass: boolean;
+
     numGaussians: number;
     tileSize: number;
     numIntersections: number;
@@ -35,7 +51,6 @@ export class Renderer {
     uniformBuffer: GPUBuffer; // camera uniforms
     pointDataBuffer: GPUBuffer;
     gaussianDataBuffer: GPUBuffer;
-    drawIndexBuffer: GPUBuffer;
     depthBuffer: GPUBuffer; // depth values, computed each time using uniforms, padded to next power of 2
     gaussianIDBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by tile and depth)
     tileCountBuffer: GPUBuffer; // used to count the number of tile intersections for each Gaussian
@@ -48,6 +63,7 @@ export class Renderer {
     numTilesBuffer: GPUBuffer;
 
     renderTarget: GPUTexture;
+    renderTargetCopy: GPUTexture;
 
     renderPipelineBindGroup: GPUBindGroup;
     pointDataBindGroup: GPUBindGroup;
@@ -79,13 +95,16 @@ export class Renderer {
 
     constructor(
         canvas: HTMLCanvasElement,
+        interactiveCamera: InteractiveCamera,
         device: GPUDevice,
         gaussians: PackedGaussians,
         tileSize: number
     ) {
         this.tileSize = tileSize;
         this.canvas = canvas;
+        this.interactiveCamera = interactiveCamera;
         this.device = device;
+        this.firstPass = true;
         const contextGpu = canvas.getContext("webgpu");
         if (!contextGpu) {
             throw new Error("WebGPU context not found!");
@@ -141,7 +160,7 @@ export class Renderer {
 
         // buffer for the range of tiles for each pixel
         this.rangesBuffer = this.device.createBuffer({
-            size: this.canvas.width  * this.canvas.height * 4 / (this.tileSize * this.tileSize), // u32
+            size: Math.ceil(this.canvas.width / this.tileSize)  * Math.ceil(this.canvas.height / this.tileSize) * 4, // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.rangesBuffer"
         });
@@ -153,85 +172,85 @@ export class Renderer {
             label: "renderer.gaussianDataBuffer"
         });
 
-        let uniforms = {
-            "viewMatrix": [
-                [
-                    0.9640601277351379,
-                    0.021361779421567917,
-                    0.2648240327835083,
-                    0
-                ],
-                [
-                    -0.0728282555937767,
-                    0.9798307418823242,
-                    0.18608540296554565,
-                    0
-                ],
-                [
-                    -0.25550761818885803,
-                    -0.1986841857433319,
-                    0.9461714625358582,
-                    0
-                ],
-                [
-                    -0.8031625151634216,
-                    0.6299861669540405,
-                    5.257271766662598,
-                    1
-                ]
-            ],
-            "projMatrix": [
-                [
-                    2.092801809310913,
-                    -0.04624200612306595,
-                    0.2653547525405884,
-                    0.2648240327835083
-                ],
-                [
-                    -0.15809710323810577,
-                    -2.121047019958496,
-                    0.18645831942558289,
-                    0.18608540296554565
-                ],
-                [
-                    -0.5546612739562988,
-                    0.4300931692123413,
-                    0.9480676054954529,
-                    0.9461714625358582
-                ],
-                [
-                    -1.743522047996521,
-                    -1.3637359142303467,
-                    5.06740665435791,
-                    5.257271766662598
-                ]
-            ],
-            "cameraPosition": [
-                -0.6314126253128052,
-                -1.6540743112564087,
-                -5.05432653427124
-            ],
-            "tanHalfFovX": 0.13491994581477185,
-            "tanHalfFovY": 0.13513134754703682,
-            "focalX": 2594.130896557771,
-            "focalY": 2590.0725949481944,
-            "scaleModifier": 0.2928870292887029
-        }
+        // let uniforms = {
+        //     "viewMatrix": [
+        //         [
+        //             0.9640601277351379,
+        //             0.021361779421567917,
+        //             0.2648240327835083,
+        //             0
+        //         ],
+        //         [
+        //             -0.0728282555937767,
+        //             0.9798307418823242,
+        //             0.18608540296554565,
+        //             0
+        //         ],
+        //         [
+        //             -0.25550761818885803,
+        //             -0.1986841857433319,
+        //             0.9461714625358582,
+        //             0
+        //         ],
+        //         [
+        //             -0.8031625151634216,
+        //             0.6299861669540405,
+        //             5.257271766662598,
+        //             1
+        //         ]
+        //     ],
+        //     "projMatrix": [
+        //         [
+        //             2.092801809310913,
+        //             -0.04624200612306595,
+        //             0.2653547525405884,
+        //             0.2648240327835083
+        //         ],
+        //         [
+        //             -0.15809710323810577,
+        //             -2.121047019958496,
+        //             0.18645831942558289,
+        //             0.18608540296554565
+        //         ],
+        //         [
+        //             -0.5546612739562988,
+        //             0.4300931692123413,
+        //             0.9480676054954529,
+        //             0.9461714625358582
+        //         ],
+        //         [
+        //             -1.743522047996521,
+        //             -1.3637359142303467,
+        //             5.06740665435791,
+        //             5.257271766662598
+        //         ]
+        //     ],
+        //     "cameraPosition": [
+        //         -0.6314126253128052,
+        //         -1.6540743112564087,
+        //         -5.05432653427124
+        //     ],
+        //     "tanHalfFovX": 0.13491994581477185,
+        //     "tanHalfFovY": 0.13513134754703682,
+        //     "focalX": 2594.130896557771,
+        //     "focalY": 2590.0725949481944,
+        //     "scaleModifier": 0.2928870292887029
+        // }
         // create a GPU buffer for the uniform data.
         this.uniformBuffer = this.device.createBuffer({
             size: uniformLayout.size,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
             label: "renderer.uniformBuffer",
         });
-        let uniformsMatrixBuffer = new ArrayBuffer(this.uniformBuffer.size);
-        uniformLayout.pack(0, uniforms, new DataView(uniformsMatrixBuffer));
-        this.device.queue.writeBuffer(
-            this.uniformBuffer,
-            0,
-            uniformsMatrixBuffer,
-            0,
-            uniformsMatrixBuffer.byteLength
-        );
+        // let uniformsMatrixBuffer = new ArrayBuffer(this.uniformBuffer.size);
+        // uniformLayout.pack(0, uniforms, new DataView(uniformsMatrixBuffer));
+        // this.device.queue.writeBuffer(
+        //     this.uniformBuffer,
+        //     0,
+        //     uniformsMatrixBuffer,
+        //     0,
+        //     uniformsMatrixBuffer.byteLength
+        // );
 
         // buffer for the num gaussians, set once
         this.numGaussianBuffer = this.device.createBuffer({
@@ -328,6 +347,12 @@ export class Renderer {
             usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING |
                        GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
         });
+        this.renderTargetCopy = this.device.createTexture({
+            size: [this.canvas.width, this.canvas.height, 1],
+            format: "rgba8unorm",
+            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING |
+                       GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
+        });
         this.computeTilesPipeline = this.device.createComputePipeline({
             layout: "auto",
             compute: {
@@ -385,7 +410,6 @@ export class Renderer {
 
         this.uniformBuffer.destroy();
         this.pointDataBuffer.destroy();
-        this.drawIndexBuffer.destroy();
         this.destroyCallback();
     }
 
@@ -570,6 +594,52 @@ export class Renderer {
             this.destroyImpl();
             return;
         }
+
+        if (!this.interactiveCamera.isDirty()) {
+            requestAnimationFrame(() => this.animate());
+            return;
+        }
+
+        {
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyTextureToTexture(
+                { texture: this.renderTargetCopy}, 
+                { texture: this.renderTarget},
+                { width: this.canvas.width, height: this.canvas.height, depthOrArrayLayers: 1 });
+            this.device.queue.submit([commandEncoder.finish()]);
+        }
+
+        const camera = this.interactiveCamera.getCamera();
+
+        const position = camera.getPosition();
+
+        const tanHalfFovX = 0.5 * this.canvas.width / camera.focalX;
+        const tanHalfFovY = 0.5 * this.canvas.height / camera.focalY;
+
+        this.depthSortMatrix = mat4toArrayOfArrays(camera.viewMatrix);
+
+        let uniformsMatrixBuffer = new ArrayBuffer(this.uniformBuffer.size);
+        let uniforms = {
+            viewMatrix: mat4toArrayOfArrays(camera.viewMatrix),
+            projMatrix: mat4toArrayOfArrays(camera.getProjMatrix()),
+            cameraPosition: Array.from(position),
+            tanHalfFovX: tanHalfFovX,
+            tanHalfFovY: tanHalfFovY,
+            focalX: camera.focalX,
+            focalY: camera.focalY,
+            scaleModifier: camera.scaleModifier,
+        };
+        console.log(uniforms);
+        uniformLayout.pack(0, uniforms, new DataView(uniformsMatrixBuffer));
+
+        this.device.queue.writeBuffer(
+            this.uniformBuffer,
+            0,
+            uniformsMatrixBuffer,
+            0,
+            uniformsMatrixBuffer.byteLength
+        );
+
         await this.sort();
 
         { 
@@ -655,6 +725,6 @@ export class Renderer {
             this.device.queue.submit([commandEncoder.finish()]);
         }
 
-        // requestAnimationFrame(() => this.animate());
+        requestAnimationFrame(() => this.animate());
     }
 }

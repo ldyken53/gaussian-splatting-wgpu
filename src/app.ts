@@ -1,4 +1,5 @@
 // We use webpack to package our shaders as string resources that we can import
+import { CameraFileParser, InteractiveCamera } from "./camera";
 import { loadFileAsArrayBuffer, PackedGaussians } from "./ply";
 import { Renderer } from "./renderer";
 
@@ -25,13 +26,22 @@ import { Renderer } from "./renderer";
     const tileSizeSlider = document.getElementById('tileSize') as HTMLInputElement;
     tileSizeSlider.value = "16";
     let canvas = document.getElementById("webgpu-canvas") as HTMLCanvasElement;
+    const cameraFileInput = document.getElementById('cameraButton')! as HTMLInputElement;
+    const cameraList = document.getElementById('cameraList')! as HTMLUListElement;
+    let interactiveCamera = InteractiveCamera.default(canvas);
+    var currentRenderer: Renderer;
 
     function handlePlyChange(event: any) {
         const file = event.target.files[0];
     
         async function onFileLoad(arrayBuffer: ArrayBuffer) {
+            if (currentRenderer) {
+                await currentRenderer.destroy();
+            }
+
             const gaussians = new PackedGaussians(arrayBuffer);
-            const renderer = new Renderer(canvas, device, gaussians, parseInt(tileSizeSlider.value));
+            const renderer = new Renderer(canvas, interactiveCamera, device, gaussians, parseInt(tileSizeSlider.value));
+            currentRenderer = renderer;
             loadingPopup.style.display = 'none'; // hide loading popup
         }
     
@@ -42,5 +52,11 @@ import { Renderer } from "./renderer";
         }
     }
     plyFileInput!.addEventListener('change', handlePlyChange);
+    new CameraFileParser(
+        cameraFileInput,
+        cameraList,
+        canvas,
+        (camera) => interactiveCamera.setNewCamera(camera),
+    );
 
 })();

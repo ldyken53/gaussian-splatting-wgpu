@@ -16,7 +16,7 @@
             <div style="display: none" id="loading-popup">Loading .ply, this may take from seconds to a couple of minutes</div>
             <div class="col-12 text-center">
                 <h4>WebGPU Webpack + TypeScript Starter</h4>
-                <canvas id="webgpu-canvas" class="img-fluid" width="800" height="800"></canvas>
+                <canvas id="webgpu-canvas" class="img-fluid" width="400" height="400"></canvas>
                 <select name="tileSize" id="tileSize">
                     <option value="1">1</option>
                     <option value="2">2</option>
@@ -24,16 +24,24 @@
                     <option value="8">8</option>
                     <option value="16">16</option>
                 </select>
+                <button style="display:block" onclick="document.getElementById('plyButton').click()">Choose
+                    point_cloud.ply</button>
+                <input type="file" accept=".ply" style="display:none" id="plyButton" />
                 <label for="tileSize">Tile Size</label>
+                <button style="display:block" onclick="document.getElementById('cameraButton').click()">Choose
+                    cameras.json</button>
+                <input type="file" accept=".json" style="display:none" id="cameraButton" />
+
+                <label for="cameraList">Available cameras:</label>
+                <ul id="cameraList">
+                    <li>(choose cameras.json to load)</li>
+                </ul>
                 <div class="col-12 alert alert-danger" id="no-webgpu" style="display:none;">
                     <h4>Error: Your browser does not support WebGPU</h4>
                     <p>You can find out how to get access to it in Chrome Canary
                     <a href="https://web.dev/gpu/#use">here</a>.</p>
                 </div>
             </div>
-            <button style="display:block" onclick="document.getElementById('plyButton').click()">Choose
-                point_cloud.ply</button>
-            <input type="file" accept=".ply" style="display:none" id="plyButton" />
         </div>
     </div>
 </body>

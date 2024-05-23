@@ -28,6 +28,7 @@
     "webpack-dev-server": "^4.2.1"
   },
   "dependencies": {
-    "@webgpu/types": "^0.1.30"
+    "@webgpu/types": "^0.1.30",
+    "wgpu-matrix": "^2.9.0"
   }
 }
