@@ -224,6 +224,8 @@ RadixSorter.prototype.sort = async function(keys : GPUBuffer, values : GPUBuffer
     var chunkCount = nextPow2(Math.ceil(size / SortChunkSize));
     var alignedSize = chunkCount * SortChunkSize;
     var numMergeSteps = Math.log2(chunkCount);
+    console.log(numMergeSteps);
+    console.log(alignedSize);
 
     var buffers = {
         keys: keys,

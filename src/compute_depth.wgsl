@@ -8,7 +8,7 @@ struct PointInput {
 struct GaussianData {
     uv: vec2<f32>,
     conic: vec3<f32>,
-    depth: u32,
+    depth: f32,
     color: vec3<f32>,
     opacity: f32,
     rect: vec4<u32>,
@@ -26,24 +26,24 @@ struct Uniforms {
 
 @group(0) @binding(0) var<storage, read> point_data: array<PointInput>;
 @group(0) @binding(1) var<storage, read_write> gaussian_data: array<GaussianData>;
-@group(0) @binding(2) var<storage, read_write> depths: array<f32>;
-@group(0) @binding(3) var<storage, read_write> tile_counts: array<u32>;
-@group(0) @binding(4) var<uniform> uniforms: Uniforms;
-@group(0) @binding(5) var<uniform> n_unpadded: u32;
-@group(0) @binding(6) var<uniform> canvas_size: vec2<u32>;
-@group(0) @binding(7) var<uniform> tile_size: u32;
+@group(0) @binding(2) var<storage, read_write> tile_counts: array<u32>;
+@group(0) @binding(3) var<uniform> uniforms: Uniforms;
+@group(0) @binding(4) var<uniform> n_unpadded: u32;
+@group(0) @binding(5) var<uniform> canvas_size: vec2<u32>;
+@group(0) @binding(6) var<uniform> tile_size: u32;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (global_id.x >= n_unpadded) {
-        depths[global_id.x] = 1e20f; // pad with +inf
+        tile_counts[global_id.x] = 0;
+        return;
     } else {
         let gaussian = point_data[global_id.x];
         let pos = vec4<f32>(gaussian.position, 1.0f);
 
         // exit if gaussian outside frustum (depth < 0.2 or x, y < -1 or x, y > 1)
         if (!in_frustum(pos)) {
-            depths[global_id.x] = 1e20f;
+            tile_counts[global_id.x] = 0;
             return;
         }
 
@@ -53,14 +53,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         proj_pos = proj_pos * inv_w;
         let point_uv = (proj_pos.xy * 0.5) + 0.5;
 
-        // just for debugging if needed
-        depths[global_id.x] = view_pos.z;
-
         // compute covariance and conics
         let cov_2d = compute_cov2d(gaussian.position, gaussian.log_scale, gaussian.rot);
         let det = cov_2d.x * cov_2d.z - cov_2d.y * cov_2d.y;
         // TODO: test if this is needed
         if (det == 0.0f) {
+            tile_counts[global_id.x] = 0;
             return;
         }        
         let det_inv = 1.0 / det;
@@ -88,9 +86,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         tile_counts[global_id.x] = (rect.w - rect.y) * (rect.z - rect.x);
 
         // need to use tile id for more significant bits, and rounded depth for least significant for proper ordering
-        var depth = view_pos.z;
-        // TODO: assumes depths are 0-9.99
-        depth = min(depth * 100, 999);
 
         // writing tile_id just for the gaussian mean position
         // let tile_id = u32(point_uv.x * num_tiles.x) + u32(floor(point_uv.y * num_tiles.y) * num_tiles.x);
@@ -102,7 +97,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         gaussian_data[global_id.x] = GaussianData(
             point_uv,
             conic,
-            u32(depth),
+            view_pos.z,
             color,
             opacity,
             rect

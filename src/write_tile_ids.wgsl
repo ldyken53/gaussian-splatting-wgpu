@@ -1,7 +1,7 @@
 struct GaussianData {
     uv: vec2<f32>,
     conic: vec3<f32>,
-    depth: u32,
+    depth: f32,
     color: vec3<f32>,
     opacity: f32,
     rect: vec4<u32>,
@@ -25,9 +25,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var offs = tile_offsets[global_id.x];
     for (var y = gaussian.rect.y; y < gaussian.rect.w; y++) {
         for (var x = gaussian.rect.x; x < gaussian.rect.z; x++) {
-            let tile_id = y * u32(num_tiles.x) + x;
+            let tile_id : u32 = y * u32(num_tiles.x) + x;
             // TODO: Fix when this overflows for large number of tiles
-            tile_ids[offs] = tile_id * 1000 + gaussian.depth;
+            // TODO: assumes depths are 0-9.99
+            tile_ids[offs] = tile_id * 1000 + u32(min(100 * gaussian.depth, 999));
             gaussian_ids[offs] = global_id.x;
             offs++;
         }

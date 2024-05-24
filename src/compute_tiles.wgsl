@@ -1,7 +1,7 @@
 struct GaussianData {
     uv: vec2<f32>,
     conic: vec3<f32>,
-    depth: u32,
+    depth: f32,
     color: vec3<f32>,
     opacity: f32,
     rect: vec4<u32>,

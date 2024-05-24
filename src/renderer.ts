@@ -35,11 +35,11 @@ function mat4toArrayOfArrays(m: Mat4): number[][] {
 export class Renderer {
     canvas: HTMLCanvasElement;
     interactiveCamera: InteractiveCamera;
-    firstPass: boolean;
 
     numGaussians: number;
     tileSize: number;
     numIntersections: number;
+    numFrames: number;
 
     device: GPUDevice;
     contextGpu: GPUCanvasContext;
@@ -51,12 +51,12 @@ export class Renderer {
     uniformBuffer: GPUBuffer; // camera uniforms
     pointDataBuffer: GPUBuffer;
     gaussianDataBuffer: GPUBuffer;
-    depthBuffer: GPUBuffer; // depth values, computed each time using uniforms, padded to next power of 2
     gaussianIDBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by tile and depth)
     tileCountBuffer: GPUBuffer; // used to count the number of tile intersections for each Gaussian
     tileOffsetBuffer: GPUBuffer; // filled with output of prefix sum on tileCountBuffer
     tileIDBuffer: GPUBuffer; // tile IDs for each gaussian
     rangesBuffer: GPUBuffer; // tile ranges for each pixel, pixel index written with stopping point in sorted gaussian buffer
+
     numGaussianBuffer: GPUBuffer;
     canvasSizeBuffer: GPUBuffer;
     tileSizeBuffer: GPUBuffer;
@@ -104,7 +104,7 @@ export class Renderer {
         this.canvas = canvas;
         this.interactiveCamera = interactiveCamera;
         this.device = device;
-        this.firstPass = true;
+        this.numFrames = 0;
         const contextGpu = canvas.getContext("webgpu");
         if (!contextGpu) {
             throw new Error("WebGPU context not found!");
@@ -134,17 +134,10 @@ export class Renderer {
         });
         new Uint8Array(this.pointDataBuffer.getMappedRange()).set(new Uint8Array(gaussians.gaussiansBuffer));
         this.pointDataBuffer.unmap();
-        
-        // buffer for the depth values, computed each time using uniforms, padded to next power of 2
-        this.depthBuffer = this.device.createBuffer({
-            size: this.radixSorter.getAlignedSize(this.numGaussians) * 4, // f32
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-            label: "renderer.depthBuffer"
-        });
 
         this.tileCountBuffer = this.device.createBuffer({
             size: this.numGaussians * 4, // u32
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.tileCountBuffer"
         });
 
@@ -168,7 +161,7 @@ export class Renderer {
         // buffer for gaussian info needed for computing tiles
         this.gaussianDataBuffer = this.device.createBuffer({
             size: this.numGaussians * (16) * 4, // vec2, vec3, vec3, f32, vec4 with alignment rules
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.gaussianDataBuffer"
         });
 
@@ -322,12 +315,11 @@ export class Renderer {
             entries: [
                 {binding: 0, resource: {buffer: this.pointDataBuffer}},
                 {binding: 1, resource: {buffer: this.gaussianDataBuffer}},
-                {binding: 2, resource: {buffer: this.depthBuffer}},
-                {binding: 3, resource: {buffer: this.tileCountBuffer}},
-                {binding: 4, resource: {buffer: this.uniformBuffer}},
-                {binding: 5, resource: {buffer: this.numGaussianBuffer}},
-                {binding: 6, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 7, resource: {buffer: this.tileSizeBuffer}}
+                {binding: 2, resource: {buffer: this.tileCountBuffer}},
+                {binding: 3, resource: {buffer: this.uniformBuffer}},
+                {binding: 4, resource: {buffer: this.numGaussianBuffer}},
+                {binding: 5, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 6, resource: {buffer: this.tileSizeBuffer}}
             ]
         });
 
@@ -426,20 +418,20 @@ export class Renderer {
         }
 
         {
-            var dbgBuffer = this.device.createBuffer({
-                size: this.gaussianDataBuffer.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            });
+            // var dbgBuffer = this.device.createBuffer({
+            //     size: this.gaussianDataBuffer.size,
+            //     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            // });
 
-            var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.gaussianDataBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            this.device.queue.submit([commandEncoder.finish()]);
-            await this.device.queue.onSubmittedWorkDone();
+            // var commandEncoder = this.device.createCommandEncoder();
+            // commandEncoder.copyBufferToBuffer(this.gaussianDataBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            // this.device.queue.submit([commandEncoder.finish()]);
+            // await this.device.queue.onSubmittedWorkDone();
 
-            await dbgBuffer.mapAsync(GPUMapMode.READ);
+            // await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-            var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
-            console.log(debugDepthVals);
+            // var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
+            // console.log(debugDepthVals);
             // var minX = 0, maxX = 0, minY = 0, maxY = 0;
             // for (var i = 0; i < debugVals.length; i++) {
             //     if (i % 2 == 0) {
@@ -536,57 +528,38 @@ export class Renderer {
 
             this.device.queue.submit([commandEncoder.finish()]);
         }
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.tileIDBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
+
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+            var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
+            console.log(debugValsf);
+        }
+        var tileIDBufferCopy = this.device.createBuffer({
+            size: this.tileIDBuffer.size,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+        });
+        var commandEncoder = this.device.createCommandEncoder();
+        commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, tileIDBufferCopy, 0, tileIDBufferCopy.size);
+        this.device.queue.submit([commandEncoder.finish()]);
 
         // sort gaussian ids by the tile ids so each tile can compute all the gaussians acting on it
+        // TODO: sort isnt working for odd numbers of merge steps??
         await this.radixSorter.sort(this.tileIDBuffer, this.gaussianIDBuffer, this.numIntersections, false, false);
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.indexBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
 
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.indexBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
-
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
-
-        //     var debugVals2 = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(debugVals2);
-        // }
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.tileBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
-
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.tileBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
-
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
-
-        //     var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(debugVals);
-        // }
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.depthBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
-
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.depthBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
-
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
-
-        //     var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
-        //     console.log(debugDepthVals);
-        // }
+        var commandEncoder = this.device.createCommandEncoder();
+        commandEncoder.copyBufferToBuffer(tileIDBufferCopy, 0, this.tileIDBuffer, 0, tileIDBufferCopy.size);
+        this.device.queue.submit([commandEncoder.finish()]);
+        await this.radixSorter.sort(tileIDBufferCopy, this.tileIDBuffer, this.numIntersections, false, false);
     }
 
     async animate() {
@@ -598,15 +571,6 @@ export class Renderer {
         if (!this.interactiveCamera.isDirty()) {
             requestAnimationFrame(() => this.animate());
             return;
-        }
-
-        {
-            var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyTextureToTexture(
-                { texture: this.renderTargetCopy}, 
-                { texture: this.renderTarget},
-                { width: this.canvas.width, height: this.canvas.height, depthOrArrayLayers: 1 });
-            this.device.queue.submit([commandEncoder.finish()]);
         }
 
         const camera = this.interactiveCamera.getCamera();
@@ -628,7 +592,139 @@ export class Renderer {
             focalX: camera.focalX,
             focalY: camera.focalY,
             scaleModifier: camera.scaleModifier,
-        };
+        }
+        console.log(this.numFrames);
+        // if (this.numFrames % 2 == 1) {
+        //   uniforms = {
+        //     "viewMatrix": [
+        //         [
+        //             0.9640601277351379,
+        //             0.021361779421567917,
+        //             0.2648240327835083,
+        //             0
+        //         ],
+        //         [
+        //             -0.0728282555937767,
+        //             0.9798307418823242,
+        //             0.18608540296554565,
+        //             0
+        //         ],
+        //         [
+        //             -0.25550761818885803,
+        //             -0.1986841857433319,
+        //             0.9461714625358582,
+        //             0
+        //         ],
+        //         [
+        //             -0.8031625747680664,
+        //             0.6299855709075928,
+        //             5.368384838104248,
+        //             1
+        //         ]
+        //     ],
+        //     "projMatrix": [
+        //         [
+        //             2.092801809310913,
+        //             -0.04624200612306595,
+        //             0.2653547525405884,
+        //             0.2648240327835083
+        //         ],
+        //         [
+        //             -0.15809710323810577,
+        //             -2.121047019958496,
+        //             0.18645831942558289,
+        //             0.18608540296554565
+        //         ],
+        //         [
+        //             -0.5546612739562988,
+        //             0.4300931692123413,
+        //             0.9480676054954529,
+        //             0.9461714625358582
+        //         ],
+        //         [
+        //             -1.7435221672058105,
+        //             -1.3637346029281616,
+        //             5.178742408752441,
+        //             5.368384838104248
+        //         ]
+        //     ],
+        //     "cameraPosition": [
+        //         -0.6608379483222961,
+        //         -1.6747502088546753,
+        //         -5.159458637237549
+        //     ],
+        //     "tanHalfFovX": 0.07709711189415534,
+        //     "tanHalfFovY": 0.07721791288402105,
+        //     "focalX": 2594.130896557771,
+        //     "focalY": 2590.0725949481944,
+        //     "scaleModifier": 0.16736401673640167
+        // };
+        // }  else {
+        //     uniforms = {
+        //         "viewMatrix": [
+        //             [
+        //                 0.9640601277351379,
+        //                 0.021361779421567917,
+        //                 0.2648240327835083,
+        //                 0
+        //             ],
+        //             [
+        //                 -0.0728282555937767,
+        //                 0.9798307418823242,
+        //                 0.18608540296554565,
+        //                 0
+        //             ],
+        //             [
+        //                 -0.25550761818885803,
+        //                 -0.1986841857433319,
+        //                 0.9461714625358582,
+        //                 0
+        //             ],
+        //             [
+        //                 -0.8031625151634216,
+        //                 0.6299861669540405,
+        //                 5.257271766662598,
+        //                 1
+        //             ]
+        //         ],
+        //         "projMatrix": [
+        //             [
+        //                 2.092801809310913,
+        //                 -0.04624200612306595,
+        //                 0.2653547525405884,
+        //                 0.2648240327835083
+        //             ],
+        //             [
+        //                 -0.15809710323810577,
+        //                 -2.121047019958496,
+        //                 0.18645831942558289,
+        //                 0.18608540296554565
+        //             ],
+        //             [
+        //                 -0.5546612739562988,
+        //                 0.4300931692123413,
+        //                 0.9480676054954529,
+        //                 0.9461714625358582
+        //             ],
+        //             [
+        //                 -1.743522047996521,
+        //                 -1.3637359142303467,
+        //                 5.06740665435791,
+        //                 5.257271766662598
+        //             ]
+        //         ],
+        //         "cameraPosition": [
+        //             -0.6314126253128052,
+        //             -1.6540743112564087,
+        //             -5.05432653427124
+        //         ],
+        //         "tanHalfFovX": 0.07709711189415534,
+        //         "tanHalfFovY": 0.07721791288402105,
+        //         "focalX": 2594.130896557771,
+        //         "focalY": 2590.0725949481944,
+        //         "scaleModifier": 0.16736401673640167
+        //     }
+        // }
         console.log(uniforms);
         uniformLayout.pack(0, uniforms, new DataView(uniformsMatrixBuffer));
 
@@ -656,10 +752,44 @@ export class Renderer {
             passEncoder.setPipeline(this.computeRangesPipeline);
             passEncoder.setBindGroup(0, this.computeRangesBindGroup);
             // workgroup is 256 and each thread does 64 elements
-            passEncoder.dispatchWorkgroups(Math.ceil(this.numIntersections / (256 * 64)));
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numIntersections / (64 * 256)));
             passEncoder.end();
 
             this.device.queue.submit([commandEncoder.finish()]);
+        }
+
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.tileIDBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
+
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+            var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
+            console.log(debugValsf);
+        }
+
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.rangesBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.rangesBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
+
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+            var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
+            console.log(debugVals);
         }
 
         { 
@@ -685,23 +815,6 @@ export class Renderer {
             this.device.queue.submit([commandEncoder.finish()]);
         }
 
-        {
-            var dbgBuffer = this.device.createBuffer({
-                size: this.rangesBuffer.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            });
-
-            var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.rangesBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            this.device.queue.submit([commandEncoder.finish()]);
-            await this.device.queue.onSubmittedWorkDone();
-
-            await dbgBuffer.mapAsync(GPUMapMode.READ);
-
-            var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
-            console.log(debugVals);
-        }
-
         { 
             // Blit the image rendered onto the screen
             const commandEncoder = this.device.createCommandEncoder();
@@ -724,7 +837,17 @@ export class Renderer {
             renderPass.end();
             this.device.queue.submit([commandEncoder.finish()]);
         }
-
+        this.numFrames++;
+        // clear everything for next pass
+        var commandEncoder = this.device.createCommandEncoder();
+        commandEncoder.clearBuffer(this.tileCountBuffer);
+        commandEncoder.clearBuffer(this.gaussianDataBuffer);
+        commandEncoder.clearBuffer(this.rangesBuffer);
+        commandEncoder.copyTextureToTexture(
+            { texture: this.renderTargetCopy}, 
+            { texture: this.renderTarget},
+            { width: this.canvas.width, height: this.canvas.height, depthOrArrayLayers: 1 });
+        this.device.queue.submit([commandEncoder.finish()]);
         requestAnimationFrame(() => this.animate());
     }
 }
