@@ -117,6 +117,7 @@ export class Renderer {
         this.lastDraw = performance.now();
 
         this.numGaussians = gaussians.numGaussians;
+        console.log(`Num Gaussians: ${this.numGaussians}`);
 
         const presentationFormat = "rgba8unorm" as GPUTextureFormat;
 
@@ -406,15 +407,19 @@ export class Renderer {
     }
 
     async sort() {
-        { // compute the depth of each vertex
+        { 
+            var start = performance.now();
+            // compute the depth of each vertex
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.computeDepthPipeline);
             passEncoder.setBindGroup(0, this.computeDepthBindGroup);
             passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 64));
             passEncoder.end();
-
             this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
+            var end = performance.now();
+            console.log(`Compute Gaussians depth took ${end - start} ms`);
         }
 
         {
@@ -462,7 +467,10 @@ export class Renderer {
             0,
             this.numGaussians * 4);
         this.device.queue.submit([commandEncoder.finish()]);
+        var start = performance.now();
         this.numIntersections = await this.scanTileCounts.scan(this.numGaussians);
+        var end = performance.now();
+        console.log(`Scan tile counts took ${end - start} ms`);
         console.log(`Found ${this.numIntersections} intersections`);
         // {
         //     var dbgBuffer = this.device.createBuffer({
@@ -518,48 +526,54 @@ export class Renderer {
                 {binding: 6, resource: {buffer: this.tileSizeBuffer}},
             ]
         });
-        { // write tile IDs at computed offsets
+        { 
+            // write tile IDs at computed offsets
+            var start = performance.now();
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.writeTileIDsPipeline);
             passEncoder.setBindGroup(0, this.writeTileIDsBindGroup);
             passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 64));
             passEncoder.end();
-
-            this.device.queue.submit([commandEncoder.finish()]);
-        }
-        {
-            var dbgBuffer = this.device.createBuffer({
-                size: this.tileIDBuffer.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            });
-
-            var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
-
-            await dbgBuffer.mapAsync(GPUMapMode.READ);
-
-            var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
-            console.log(debugValsf);
+            var end = performance.now();    
+            console.log(`Write Tile IDs took ${end - start} ms`)
         }
-        var tileIDBufferCopy = this.device.createBuffer({
-            size: this.tileIDBuffer.size,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
-        });
-        var commandEncoder = this.device.createCommandEncoder();
-        commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, tileIDBufferCopy, 0, tileIDBufferCopy.size);
-        this.device.queue.submit([commandEncoder.finish()]);
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.tileIDBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
+
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
+
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+        //     var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
+        //     console.log(debugValsf);
+        // }
+        // var tileIDBufferCopy = this.device.createBuffer({
+        //     size: this.tileIDBuffer.size,
+        //     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+        // });
+        // var commandEncoder = this.device.createCommandEncoder();
+        // commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, tileIDBufferCopy, 0, tileIDBufferCopy.size);
+        // this.device.queue.submit([commandEncoder.finish()]);
 
         // sort gaussian ids by the tile ids so each tile can compute all the gaussians acting on it
-        // TODO: sort isnt working for odd numbers of merge steps??
+        // TODO: keys buffer may not be sorted correctly on od number of merge steps
+        var start = performance.now();
         await this.radixSorter.sort(this.tileIDBuffer, this.gaussianIDBuffer, this.numIntersections, false, false);
-
-        var commandEncoder = this.device.createCommandEncoder();
-        commandEncoder.copyBufferToBuffer(tileIDBufferCopy, 0, this.tileIDBuffer, 0, tileIDBufferCopy.size);
-        this.device.queue.submit([commandEncoder.finish()]);
-        await this.radixSorter.sort(tileIDBufferCopy, this.tileIDBuffer, this.numIntersections, false, false);
+        var end = performance.now();
+        console.log(`Sort took ${end - start} ms`);
+        // var commandEncoder = this.device.createCommandEncoder();
+        // commandEncoder.copyBufferToBuffer(tileIDBufferCopy, 0, this.tileIDBuffer, 0, tileIDBufferCopy.size);
+        // this.device.queue.submit([commandEncoder.finish()]);
+        // await this.radixSorter.sort(tileIDBufferCopy, this.tileIDBuffer, this.numIntersections, false, false);
     }
 
     async animate() {
@@ -572,6 +586,8 @@ export class Renderer {
             requestAnimationFrame(() => this.animate());
             return;
         }
+        console.log(`++++++++ New frame ++++++++`);
+        var totalStart = performance.now();
 
         const camera = this.interactiveCamera.getCamera();
 
@@ -593,7 +609,7 @@ export class Renderer {
             focalY: camera.focalY,
             scaleModifier: camera.scaleModifier,
         }
-        console.log(this.numFrames);
+        // console.log(this.numFrames);
         // if (this.numFrames % 2 == 1) {
         //   uniforms = {
         //     "viewMatrix": [
@@ -725,7 +741,7 @@ export class Renderer {
         //         "scaleModifier": 0.16736401673640167
         //     }
         // }
-        console.log(uniforms);
+        // console.log(uniforms);
         uniformLayout.pack(0, uniforms, new DataView(uniformsMatrixBuffer));
 
         this.device.queue.writeBuffer(
@@ -739,6 +755,7 @@ export class Renderer {
         await this.sort();
 
         { 
+            var start = performance.now();
             this.computeRangesBindGroup = this.device.createBindGroup({
                 layout: this.computeRangesPipeline.getBindGroupLayout(0),
                 entries: [
@@ -756,43 +773,47 @@ export class Renderer {
             passEncoder.end();
 
             this.device.queue.submit([commandEncoder.finish()]);
-        }
-
-        {
-            var dbgBuffer = this.device.createBuffer({
-                size: this.tileIDBuffer.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            });
-
-            var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
-
-            await dbgBuffer.mapAsync(GPUMapMode.READ);
-
-            var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
-            console.log(debugValsf);
+            var end = performance.now();
+            console.log(`Compute tile ranges took ${end - start} ms`);
         }
 
-        {
-            var dbgBuffer = this.device.createBuffer({
-                size: this.rangesBuffer.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            });
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.tileIDBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
 
-            var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.rangesBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            this.device.queue.submit([commandEncoder.finish()]);
-            await this.device.queue.onSubmittedWorkDone();
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
 
-            await dbgBuffer.mapAsync(GPUMapMode.READ);
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-            var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
-            console.log(debugVals);
-        }
+        //     var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
+        //     console.log(debugValsf);
+        // }
+
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.rangesBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
+
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.rangesBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
+
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+        //     var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
+        //     console.log(debugVals);
+        // }
 
         { 
+            var start = performance.now();
             this.computeTilesBindGroup = this.device.createBindGroup({
                 layout: this.computeTilesPipeline.getBindGroupLayout(0),
                 entries: [
@@ -813,9 +834,13 @@ export class Renderer {
             passEncoder.end();
 
             this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
+            var end = performance.now();
+            console.log(`Compute tiles took ${end - start} ms`);
         }
 
         { 
+            var start = performance.now();
             // Blit the image rendered onto the screen
             const commandEncoder = this.device.createCommandEncoder();
 
@@ -836,6 +861,9 @@ export class Renderer {
             renderPass.draw(6, 1, 0, 0);
             renderPass.end();
             this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
+            var end = performance.now();
+            console.log(`Rendering took ${end - start} ms`);
         }
         this.numFrames++;
         // clear everything for next pass
@@ -843,11 +871,17 @@ export class Renderer {
         commandEncoder.clearBuffer(this.tileCountBuffer);
         commandEncoder.clearBuffer(this.gaussianDataBuffer);
         commandEncoder.clearBuffer(this.rangesBuffer);
+        this.tileIDBuffer.destroy();
+        this.gaussianIDBuffer.destroy();
         commandEncoder.copyTextureToTexture(
             { texture: this.renderTargetCopy}, 
             { texture: this.renderTarget},
             { width: this.canvas.width, height: this.canvas.height, depthOrArrayLayers: 1 });
         this.device.queue.submit([commandEncoder.finish()]);
+        await this.device.queue.onSubmittedWorkDone();
+        var totalEnd = performance.now();
+        console.log(`TOTAL FRAME TIME: ${totalEnd - totalStart} ms`);
+        console.log("------------------------------------------");
         requestAnimationFrame(() => this.animate());
     }
 }

@@ -224,8 +224,6 @@ RadixSorter.prototype.sort = async function(keys : GPUBuffer, values : GPUBuffer
     var chunkCount = nextPow2(Math.ceil(size / SortChunkSize));
     var alignedSize = chunkCount * SortChunkSize;
     var numMergeSteps = Math.log2(chunkCount);
-    console.log(numMergeSteps);
-    console.log(alignedSize);
 
     var buffers = {
         keys: keys,
@@ -451,6 +449,8 @@ RadixSorter.prototype.sort = async function(keys : GPUBuffer, values : GPUBuffer
     } else {
         commandEncoder.copyBufferToBuffer(
             scratch.values, readbackOffset * 4, buffers.values, 0, size * 4);
+        commandEncoder.copyBufferToBuffer(
+            scratch.keys, readbackOffset * 4, buffers.keys, 0, size * 4);
     }
 
     this.device.queue.submit([commandEncoder.finish()]);
