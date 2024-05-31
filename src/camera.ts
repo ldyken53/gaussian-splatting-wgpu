@@ -77,36 +77,90 @@ export class Camera {
     }
 
     static default(canvas: HTMLCanvasElement): Camera {
-        return cameraFromJSON({
-            "id": 0,
-            "img_name": "2020_08_01__11_38_23",
-            "width": 2390,
-            "height": 2393,
-            "position": [
-                -0.6314126877625473,
-                -1.6540744433177723,
-                -5.05432650449913
-            ],
-            "rotation": [
-                [
-                    0.9640601150087581,
-                    0.02136179240680476,
-                    0.2648240330379194
-                ],
-                [
-                    -0.07282826562785993,
-                    0.9798307346969114,
-                    0.1860853972480072
-                ],
-                [
-                    -0.25550760923099397,
-                    -0.19868418449509095,
-                    0.9461714730727103
-                ]
-            ],
-            "fy": 2590.0725949481944,
-            "fx": 2594.130896557771
-        }, canvas.width, canvas.height);
+        // return cameraFromJSON({
+        //     "id": 0,
+        //     "img_name": "2020_08_01__11_38_23",
+        //     "width": 2390,
+        //     "height": 2393,
+        //     "position": [
+        //         -0.6314126877625473,
+        //         -1.6540744433177723,
+        //         -5.05432650449913
+        //     ],
+        //     "rotation": [
+        //         [
+        //             0.9640601150087581,
+        //             0.02136179240680476,
+        //             0.2648240330379194
+        //         ],
+        //         [
+        //             -0.07282826562785993,
+        //             0.9798307346969114,
+        //             0.1860853972480072
+        //         ],
+        //         [
+        //             -0.25550760923099397,
+        //             -0.19868418449509095,
+        //             0.9461714730727103
+        //         ]
+        //     ],
+        //     "fy": 2590.0725949481944,
+        //     "fx": 2594.130896557771
+        // }, canvas.width, canvas.height);
+        const canvasW = 800
+        const canvasH = 800
+
+        const fovFactor = 1
+
+        const fovX = focal2fov(canvasW, canvasW) / fovFactor
+        const fovY = focal2fov(canvasH, canvasH) / fovFactor
+
+        const projectionMatrix = getProjectionMatrix(0.2, 10, fovX, fovY)
+
+        const viewMatrix = mat4.create(
+        0.582345724105835,
+        -0.3235852122306824,
+        0.7372694611549377,
+        0,
+        0.23868794739246368,
+        0.9381394982337952,
+        0.22253619134426117,
+        0,
+        -0.7680802941322327,
+        0.04477229341864586,
+        0.6242981553077698,
+        0,
+        0.13517332077026367,
+        -1.1848870515823364,
+        3.3873789310455322,
+        1,
+        )
+
+        return new Camera(
+        canvasW,
+        canvasH,
+        // 1,
+        // 1,
+        viewMatrix,
+        projectionMatrix,
+        // fovX,
+        // fovY,
+        canvasW,
+        canvasH,
+        1 * fovFactor,
+        )
+    }
+
+    public setScale(scale: number) {
+        this.scaleModifier = scale
+    }
+    
+    public setFocalX(focalX: number) {
+        this.focalX = focalX
+    }
+
+    public setFocalY(focalY: number) {
+        this.focalY = focalY
     }
 
     // computes the depth of a point in camera space, for sorting
@@ -124,9 +178,10 @@ export class Camera {
     }
 
     getProjMatrix(): Mat4 {
-        var flippedY = mat4.clone(this.perspective);
-        flippedY = mat4.mul(flippedY, diagonal4x4(1, -1, 1, 1));
-        return mat4.multiply(flippedY, this.viewMatrix);
+        // var flippedY = mat4.clone(this.perspective);
+        // flippedY = mat4.mul(flippedY, diagonal4x4(1, -1, 1, 1));
+        // return mat4.multiply(flippedY, this.viewMatrix);
+        return mat4.multiply(this.perspective, this.viewMatrix)
     }
 
     // for camera interactions
@@ -144,6 +199,19 @@ export class Camera {
         mat4.rotateZ(viewInv, z, viewInv);
         mat4.inverse(viewInv, this.viewMatrix);
     }
+
+    isInsideFrustum(point: Vec3) {
+        const projMatrix = this.getProjMatrix()
+        const p = vec3.transformMat4(point, projMatrix, [0, 0, 0])
+        return (
+          p[0]! >= -1 &&
+          p[0]! <= 1 &&
+          p[1]! >= -1 &&
+          p[1]! <= 1 &&
+          p[2]! >= -1 &&
+          p[2]! <= 1
+        )
+      }
 
     // the depth axis is the third column of the transposed view matrix
     private depthAxis(): Vec3 {
@@ -185,17 +253,19 @@ export class InteractiveCamera {
             this.oldX = e.pageX;
             this.oldY = e.pageY;
             this.setDirty();
+            this.canvas.requestPointerLock()
             e.preventDefault();
         }, false);
 
         this.canvas.addEventListener('mouseup', (e) => {
             this.drag = false;
+            document.exitPointerLock()
         }, false);
 
         this.canvas.addEventListener('mousemove', (e) => {
             if (!this.drag) return false;
-            this.dRX = (e.pageX - this.oldX) * 2 * Math.PI / this.canvas.width;
-            this.dRY = -(e.pageY - this.oldY) * 2 * Math.PI / this.canvas.height;
+            this.dRX = (e.movementX * 2 * Math.PI) / this.canvas.width
+            this.dRY = (-e.movementY * 2 * Math.PI) / this.canvas.height
             this.oldX = e.pageX;
             this.oldY = e.pageY;
             this.setDirty();
@@ -281,24 +351,40 @@ function worldToCamFromRT(R: Mat3, t: Vec3): Mat4 {
 
 // converting camera coordinate systems is always black magic :(
 function cameraFromJSON(rawCamera: CameraRaw, canvasW: number, canvasH: number): Camera {
-    const fovX = focal2fov(rawCamera.fx, rawCamera.width);
-    const fovY = focal2fov(rawCamera.fy, rawCamera.height);
-    const projectionMatrix = getProjectionMatrix(0.2, 100, fovX, fovY);
+    // const fovX = focal2fov(rawCamera.fx, rawCamera.width);
+    // const fovY = focal2fov(rawCamera.fy, rawCamera.height);
+    // const projectionMatrix = getProjectionMatrix(0.2, 100, fovX, fovY);
 
-    const R = mat3.create(...rawCamera.rotation.flat());
-    const T = rawCamera.position;
+    // const R = mat3.create(...rawCamera.rotation.flat());
+    // const T = rawCamera.position;
 
-    const viewMatrix = worldToCamFromRT(R, T);
+    // const viewMatrix = worldToCamFromRT(R, T);
 
-    return new Camera(
-        canvasH,
-        canvasW,
-        viewMatrix,
-        projectionMatrix,
-        rawCamera.fx,
-        rawCamera.fy,
-        Math.max(canvasW / rawCamera.width, canvasH / rawCamera.height),
-    );
+    // return new Camera(
+    //     canvasH,
+    //     canvasW,
+    //     viewMatrix,
+    //     projectionMatrix,
+    //     rawCamera.fx,
+    //     rawCamera.fy,
+    //     Math.max(canvasW / rawCamera.width, canvasH / rawCamera.height),
+    // );
+    const canvW = 800;
+    const canvH = 800;
+
+    const fovX = focal2fov(canvW, canvW)
+    const fovY = focal2fov(canvH, canvH)
+  
+    const projectionMatrix = getProjectionMatrix(0.2, 100, fovX, fovY)
+  
+    const R = mat3.create(...rawCamera.rotation.flat())
+    const T = rawCamera.position
+  
+    const viewMatrix = worldToCamFromRT(R, T)
+  
+    const camera = new Camera(canvH, canvW, viewMatrix, projectionMatrix, canvW, canvH, 1)
+  
+    return camera
 }
 
 // A UI component that parses a JSON file containing a list of cameras and displays them as a list,
