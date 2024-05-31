@@ -6,7 +6,7 @@ import { RadixSorter } from './radix_sort';
 import { ExclusiveScanPipeline, ExclusiveScanner } from './exclusive_scan';
 import { InteractiveCamera } from './camera';
 
-import compute_depth from "./compute_depth.wgsl";
+import process_gaussians from "./process_gaussians.wgsl";
 import compute_tiles from "./compute_tiles.wgsl";
 import compute_ranges from "./compute_ranges.wgsl";
 import render from "./render.wgsl";
@@ -67,13 +67,13 @@ export class Renderer {
 
     renderPipelineBindGroup: GPUBindGroup;
     pointDataBindGroup: GPUBindGroup;
-    computeDepthBindGroup: GPUBindGroup;
+    processGaussiansBindGroup: GPUBindGroup;
     writeTileIDsBindGroup: GPUBindGroup;
     computeTilesBindGroup: GPUBindGroup;
     computeRangesBindGroup: GPUBindGroup;
 
     renderPipeline: GPURenderPipeline;
-    computeDepthPipeline: GPUComputePipeline;
+    processGaussiansPipeline: GPUComputePipeline;
     writeTileIDsPipeline: GPUComputePipeline;
     computeTilesPipeline: GPUComputePipeline;
     computeRangesPipeline: GPUComputePipeline;
@@ -166,85 +166,12 @@ export class Renderer {
             label: "renderer.gaussianDataBuffer"
         });
 
-        // let uniforms = {
-        //     "viewMatrix": [
-        //         [
-        //             0.9640601277351379,
-        //             0.021361779421567917,
-        //             0.2648240327835083,
-        //             0
-        //         ],
-        //         [
-        //             -0.0728282555937767,
-        //             0.9798307418823242,
-        //             0.18608540296554565,
-        //             0
-        //         ],
-        //         [
-        //             -0.25550761818885803,
-        //             -0.1986841857433319,
-        //             0.9461714625358582,
-        //             0
-        //         ],
-        //         [
-        //             -0.8031625151634216,
-        //             0.6299861669540405,
-        //             5.257271766662598,
-        //             1
-        //         ]
-        //     ],
-        //     "projMatrix": [
-        //         [
-        //             2.092801809310913,
-        //             -0.04624200612306595,
-        //             0.2653547525405884,
-        //             0.2648240327835083
-        //         ],
-        //         [
-        //             -0.15809710323810577,
-        //             -2.121047019958496,
-        //             0.18645831942558289,
-        //             0.18608540296554565
-        //         ],
-        //         [
-        //             -0.5546612739562988,
-        //             0.4300931692123413,
-        //             0.9480676054954529,
-        //             0.9461714625358582
-        //         ],
-        //         [
-        //             -1.743522047996521,
-        //             -1.3637359142303467,
-        //             5.06740665435791,
-        //             5.257271766662598
-        //         ]
-        //     ],
-        //     "cameraPosition": [
-        //         -0.6314126253128052,
-        //         -1.6540743112564087,
-        //         -5.05432653427124
-        //     ],
-        //     "tanHalfFovX": 0.13491994581477185,
-        //     "tanHalfFovY": 0.13513134754703682,
-        //     "focalX": 2594.130896557771,
-        //     "focalY": 2590.0725949481944,
-        //     "scaleModifier": 0.2928870292887029
-        // }
         // create a GPU buffer for the uniform data.
         this.uniformBuffer = this.device.createBuffer({
             size: uniformLayout.size,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
             label: "renderer.uniformBuffer",
         });
-        // let uniformsMatrixBuffer = new ArrayBuffer(this.uniformBuffer.size);
-        // uniformLayout.pack(0, uniforms, new DataView(uniformsMatrixBuffer));
-        // this.device.queue.writeBuffer(
-        //     this.uniformBuffer,
-        //     0,
-        //     uniformsMatrixBuffer,
-        //     0,
-        //     uniformsMatrixBuffer.byteLength
-        // );
 
         // buffer for the num gaussians, set once
         this.numGaussianBuffer = this.device.createBuffer({
@@ -302,17 +229,17 @@ export class Renderer {
             1
         );
 
-        this.computeDepthPipeline = this.device.createComputePipeline({
+        this.processGaussiansPipeline = this.device.createComputePipeline({
             layout: "auto",
             compute: {
                 module: this.device.createShaderModule({
-                    code: compute_depth,
+                    code: process_gaussians,
                 }),
                 entryPoint: "main",
             },
         });
-        this.computeDepthBindGroup = this.device.createBindGroup({
-            layout: this.computeDepthPipeline.getBindGroupLayout(0),
+        this.processGaussiansBindGroup = this.device.createBindGroup({
+            layout: this.processGaussiansPipeline.getBindGroupLayout(0),
             entries: [
                 {binding: 0, resource: {buffer: this.pointDataBuffer}},
                 {binding: 1, resource: {buffer: this.gaussianDataBuffer}},
@@ -403,18 +330,140 @@ export class Renderer {
 
         this.uniformBuffer.destroy();
         this.pointDataBuffer.destroy();
+        this.gaussianDataBuffer.destroy();
+        this.gaussianIDBuffer.destroy();
+        this.tileCountBuffer.destroy();
+        this.tileOffsetBuffer.destroy();
+        this.tileIDBuffer.destroy();
+        this.rangesBuffer.destroy();
+        this.numGaussianBuffer.destroy();
+        this.canvasSizeBuffer.destroy();
+        this.tileSizeBuffer.destroy();
+        this.numTilesBuffer.destroy();
+        this.renderTarget.destroy();
+        this.renderTargetCopy.destroy();
+
         this.destroyCallback();
     }
 
-    async sort() {
+    async animate() {
+        if (this.destroyCallback !== null) {
+            this.destroyImpl();
+            return;
+        }
+
+        if (!this.interactiveCamera.isDirty()) {
+            requestAnimationFrame(() => this.animate());
+            return;
+        }
+        console.log(`++++++++ New frame ++++++++`);
+        var totalStart = performance.now();
+
+        const camera = this.interactiveCamera.getCamera();
+
+        const position = camera.getPosition();
+
+        const tanHalfFovX = 0.5 * this.canvas.width / camera.focalX;
+        const tanHalfFovY = 0.5 * this.canvas.height / camera.focalY;
+
+        this.depthSortMatrix = mat4toArrayOfArrays(camera.viewMatrix);
+
+        let uniformsMatrixBuffer = new ArrayBuffer(this.uniformBuffer.size);
+        let uniforms = {
+            viewMatrix: mat4toArrayOfArrays(camera.viewMatrix),
+            projMatrix: mat4toArrayOfArrays(camera.getProjMatrix()),
+            cameraPosition: Array.from(position),
+            tanHalfFovX: tanHalfFovX,
+            tanHalfFovY: tanHalfFovY,
+            focalX: camera.focalX,
+            focalY: camera.focalY,
+            scaleModifier: camera.scaleModifier,
+        }
+
+        uniforms = {
+            "viewMatrix": [
+                [
+                    -0.20900966227054596,
+                    0.24394956231117249,
+                    -0.9469971656799316,
+                    0
+                ],
+                [
+                    -0.47260811924934387,
+                    0.822589099407196,
+                    0.31620994210243225,
+                    0
+                ],
+                [
+                    0.8561288118362427,
+                    0.5136495232582092,
+                    -0.05663653090596199,
+                    0
+                ],
+                [
+                    -0.0700305923819542,
+                    -1.918486475944519,
+                    3.4478836059570312,
+                    1
+                ]
+            ],
+            "projMatrix": [
+                [
+                    -0.20900966227054596,
+                    0.48789912462234497,
+                    -0.9488949775695801,
+                    -0.9469971656799316
+                ],
+                [
+                    -0.47260811924934387,
+                    1.645178198814392,
+                    0.3168436288833618,
+                    0.31620994210243225
+                ],
+                [
+                    0.8561288118362427,
+                    1.0272990465164185,
+                    -0.05675003305077553,
+                    -0.05663653090596199
+                ],
+                [
+                    -0.0700305923819542,
+                    -3.836972951889038,
+                    3.254392385482788,
+                    3.4478836059570312
+                ]
+            ],
+            "cameraPosition": [
+                3.718512535095215,
+                0.4547739326953888,
+                1.2406609058380127
+            ],
+            "tanHalfFovX": 0.9583333333333334,
+            "tanHalfFovY": 0.5,
+            "focalX": 960,
+            "focalY": 960,
+            "scaleModifier": 1,
+        }
+        
+        console.log(uniforms);
+        uniformLayout.pack(0, uniforms, new DataView(uniformsMatrixBuffer));
+
+        this.device.queue.writeBuffer(
+            this.uniformBuffer,
+            0,
+            uniformsMatrixBuffer,
+            0,
+            uniformsMatrixBuffer.byteLength
+        );
+
         { 
             var start = performance.now();
-            // compute the depth of each vertex
+            // compute the tile counts and precompute per view properties of each gaussian (conic, depth, etc.)
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
-            passEncoder.setPipeline(this.computeDepthPipeline);
-            passEncoder.setBindGroup(0, this.computeDepthBindGroup);
-            passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 64));
+            passEncoder.setPipeline(this.processGaussiansPipeline);
+            passEncoder.setBindGroup(0, this.processGaussiansBindGroup);
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 256));
             passEncoder.end();
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
@@ -422,42 +471,6 @@ export class Renderer {
             console.log(`Compute Gaussians depth took ${end - start} ms`);
         }
 
-        {
-            // var dbgBuffer = this.device.createBuffer({
-            //     size: this.gaussianDataBuffer.size,
-            //     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            // });
-
-            // var commandEncoder = this.device.createCommandEncoder();
-            // commandEncoder.copyBufferToBuffer(this.gaussianDataBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            // this.device.queue.submit([commandEncoder.finish()]);
-            // await this.device.queue.onSubmittedWorkDone();
-
-            // await dbgBuffer.mapAsync(GPUMapMode.READ);
-
-            // var debugDepthVals = new Float32Array(dbgBuffer.getMappedRange());
-            // console.log(debugDepthVals);
-            // var minX = 0, maxX = 0, minY = 0, maxY = 0;
-            // for (var i = 0; i < debugVals.length; i++) {
-            //     if (i % 2 == 0) {
-            //         if (debugVals[i] < minX) {
-            //             minX = debugVals[i];
-            //         }
-            //         if (debugVals[i] > maxX) {
-            //             maxX = debugVals[i];
-            //         }
-            //     } else {
-            //         if (debugVals[i] < minY) {
-            //             minY = debugVals[i];
-            //         }
-            //         if (debugVals[i] > maxY) {
-            //             maxY = debugVals[i];
-            //         }
-            //     }
-            // }
-            // console.log(minX, maxX);
-            // console.log(minY, maxY);
-        }
         // find the offsets for each gaussian to write its tile intersections
         var commandEncoder = this.device.createCommandEncoder();
         // we scan the tileOffsetBuffer, so copy the tile count information over
@@ -472,22 +485,6 @@ export class Renderer {
         var end = performance.now();
         console.log(`Scan tile counts took ${end - start} ms`);
         console.log(`Found ${this.numIntersections} intersections`);
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.tileCountBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
-
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.tileCountBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
-
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
-
-        //     var tileCountVals = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(tileCountVals);
-        // }
         // {
         //     var dbgBuffer = this.device.createBuffer({
         //         size: this.tileOffsetBuffer.size,
@@ -527,234 +524,28 @@ export class Renderer {
             ]
         });
         { 
-            // write tile IDs at computed offsets
+            // write tile/depth combined IDs at computed offsets for each gaussian
             var start = performance.now();
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.writeTileIDsPipeline);
             passEncoder.setBindGroup(0, this.writeTileIDsBindGroup);
-            passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 64));
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 256));
             passEncoder.end();
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
             var end = performance.now();    
             console.log(`Write Tile IDs took ${end - start} ms`)
         }
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.tileIDBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
 
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
-
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
-
-        //     var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(debugValsf);
-        // }
-        // var tileIDBufferCopy = this.device.createBuffer({
-        //     size: this.tileIDBuffer.size,
-        //     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
-        // });
-        // var commandEncoder = this.device.createCommandEncoder();
-        // commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, tileIDBufferCopy, 0, tileIDBufferCopy.size);
-        // this.device.queue.submit([commandEncoder.finish()]);
-
-        // sort gaussian ids by the tile ids so each tile can compute all the gaussians acting on it
-        // TODO: keys buffer may not be sorted correctly on od number of merge steps
+        // sort gaussian ids by the tile ids so each tile has all the gaussians acting on it
         var start = performance.now();
         await this.radixSorter.sort(this.tileIDBuffer, this.gaussianIDBuffer, this.numIntersections, false, false);
         var end = performance.now();
         console.log(`Sort took ${end - start} ms`);
-        // var commandEncoder = this.device.createCommandEncoder();
-        // commandEncoder.copyBufferToBuffer(tileIDBufferCopy, 0, this.tileIDBuffer, 0, tileIDBufferCopy.size);
-        // this.device.queue.submit([commandEncoder.finish()]);
-        // await this.radixSorter.sort(tileIDBufferCopy, this.tileIDBuffer, this.numIntersections, false, false);
-    }
-
-    async animate() {
-        if (this.destroyCallback !== null) {
-            this.destroyImpl();
-            return;
-        }
-
-        if (!this.interactiveCamera.isDirty()) {
-            requestAnimationFrame(() => this.animate());
-            return;
-        }
-        console.log(`++++++++ New frame ++++++++`);
-        var totalStart = performance.now();
-
-        const camera = this.interactiveCamera.getCamera();
-
-        const position = camera.getPosition();
-
-        const tanHalfFovX = 0.5 * this.canvas.width / camera.focalX;
-        const tanHalfFovY = 0.5 * this.canvas.height / camera.focalY;
-
-        this.depthSortMatrix = mat4toArrayOfArrays(camera.viewMatrix);
-
-        let uniformsMatrixBuffer = new ArrayBuffer(this.uniformBuffer.size);
-        let uniforms = {
-            viewMatrix: mat4toArrayOfArrays(camera.viewMatrix),
-            projMatrix: mat4toArrayOfArrays(camera.getProjMatrix()),
-            cameraPosition: Array.from(position),
-            tanHalfFovX: tanHalfFovX,
-            tanHalfFovY: tanHalfFovY,
-            focalX: camera.focalX,
-            focalY: camera.focalY,
-            scaleModifier: camera.scaleModifier,
-        }
-        // console.log(this.numFrames);
-        // if (this.numFrames % 2 == 1) {
-        //   uniforms = {
-        //     "viewMatrix": [
-        //         [
-        //             0.9640601277351379,
-        //             0.021361779421567917,
-        //             0.2648240327835083,
-        //             0
-        //         ],
-        //         [
-        //             -0.0728282555937767,
-        //             0.9798307418823242,
-        //             0.18608540296554565,
-        //             0
-        //         ],
-        //         [
-        //             -0.25550761818885803,
-        //             -0.1986841857433319,
-        //             0.9461714625358582,
-        //             0
-        //         ],
-        //         [
-        //             -0.8031625747680664,
-        //             0.6299855709075928,
-        //             5.368384838104248,
-        //             1
-        //         ]
-        //     ],
-        //     "projMatrix": [
-        //         [
-        //             2.092801809310913,
-        //             -0.04624200612306595,
-        //             0.2653547525405884,
-        //             0.2648240327835083
-        //         ],
-        //         [
-        //             -0.15809710323810577,
-        //             -2.121047019958496,
-        //             0.18645831942558289,
-        //             0.18608540296554565
-        //         ],
-        //         [
-        //             -0.5546612739562988,
-        //             0.4300931692123413,
-        //             0.9480676054954529,
-        //             0.9461714625358582
-        //         ],
-        //         [
-        //             -1.7435221672058105,
-        //             -1.3637346029281616,
-        //             5.178742408752441,
-        //             5.368384838104248
-        //         ]
-        //     ],
-        //     "cameraPosition": [
-        //         -0.6608379483222961,
-        //         -1.6747502088546753,
-        //         -5.159458637237549
-        //     ],
-        //     "tanHalfFovX": 0.07709711189415534,
-        //     "tanHalfFovY": 0.07721791288402105,
-        //     "focalX": 2594.130896557771,
-        //     "focalY": 2590.0725949481944,
-        //     "scaleModifier": 0.16736401673640167
-        // };
-        // }  else {
-        //     uniforms = {
-        //         "viewMatrix": [
-        //             [
-        //                 0.9640601277351379,
-        //                 0.021361779421567917,
-        //                 0.2648240327835083,
-        //                 0
-        //             ],
-        //             [
-        //                 -0.0728282555937767,
-        //                 0.9798307418823242,
-        //                 0.18608540296554565,
-        //                 0
-        //             ],
-        //             [
-        //                 -0.25550761818885803,
-        //                 -0.1986841857433319,
-        //                 0.9461714625358582,
-        //                 0
-        //             ],
-        //             [
-        //                 -0.8031625151634216,
-        //                 0.6299861669540405,
-        //                 5.257271766662598,
-        //                 1
-        //             ]
-        //         ],
-        //         "projMatrix": [
-        //             [
-        //                 2.092801809310913,
-        //                 -0.04624200612306595,
-        //                 0.2653547525405884,
-        //                 0.2648240327835083
-        //             ],
-        //             [
-        //                 -0.15809710323810577,
-        //                 -2.121047019958496,
-        //                 0.18645831942558289,
-        //                 0.18608540296554565
-        //             ],
-        //             [
-        //                 -0.5546612739562988,
-        //                 0.4300931692123413,
-        //                 0.9480676054954529,
-        //                 0.9461714625358582
-        //             ],
-        //             [
-        //                 -1.743522047996521,
-        //                 -1.3637359142303467,
-        //                 5.06740665435791,
-        //                 5.257271766662598
-        //             ]
-        //         ],
-        //         "cameraPosition": [
-        //             -0.6314126253128052,
-        //             -1.6540743112564087,
-        //             -5.05432653427124
-        //         ],
-        //         "tanHalfFovX": 0.07709711189415534,
-        //         "tanHalfFovY": 0.07721791288402105,
-        //         "focalX": 2594.130896557771,
-        //         "focalY": 2590.0725949481944,
-        //         "scaleModifier": 0.16736401673640167
-        //     }
-        // }
-        // console.log(uniforms);
-        uniformLayout.pack(0, uniforms, new DataView(uniformsMatrixBuffer));
-
-        this.device.queue.writeBuffer(
-            this.uniformBuffer,
-            0,
-            uniformsMatrixBuffer,
-            0,
-            uniformsMatrixBuffer.byteLength
-        );
-
-        await this.sort();
 
         { 
+            // compute the ranges of IDs for each tile to work on
             var start = performance.now();
             this.computeRangesBindGroup = this.device.createBindGroup({
                 layout: this.computeRangesPipeline.getBindGroupLayout(0),
@@ -795,24 +586,8 @@ export class Renderer {
         //     console.log(debugValsf);
         // }
 
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.rangesBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
-
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.rangesBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
-
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
-
-        //     var debugVals = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(debugVals);
-        // }
-
         { 
+            // compute the final image - each pixel accumulates the colors of the gaussians in its tile
             var start = performance.now();
             this.computeTilesBindGroup = this.device.createBindGroup({
                 layout: this.computeTilesPipeline.getBindGroupLayout(0),
@@ -840,8 +615,8 @@ export class Renderer {
         }
 
         { 
+            // blit the computed image onto the screen
             var start = performance.now();
-            // Blit the image rendered onto the screen
             const commandEncoder = this.device.createCommandEncoder();
 
             const renderPassDesc = {
@@ -880,6 +655,7 @@ export class Renderer {
         this.device.queue.submit([commandEncoder.finish()]);
         await this.device.queue.onSubmittedWorkDone();
         var totalEnd = performance.now();
+
         console.log(`TOTAL FRAME TIME: ${totalEnd - totalStart} ms`);
         console.log("------------------------------------------");
         requestAnimationFrame(() => this.animate());

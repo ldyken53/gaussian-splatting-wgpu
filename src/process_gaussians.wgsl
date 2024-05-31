@@ -32,7 +32,7 @@ struct Uniforms {
 @group(0) @binding(5) var<uniform> canvas_size: vec2<u32>;
 @group(0) @binding(6) var<uniform> tile_size: u32;
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (global_id.x >= n_unpadded) {
         tile_counts[global_id.x] = 0;
@@ -117,7 +117,7 @@ fn in_frustum(world_pos: vec4<f32>) -> bool {
 
   let p_view = uniforms.view_matrix * world_pos;
   
-  if (p_view.z <= 0.2f || ((p_proj.x <= -1 || p_proj.x >= 1 || p_proj.y <= -1 || p_proj.y >= 1))) {
+  if (p_view.z <= 0.2f || ((p_proj.x <= -1.1 || p_proj.x >= 1.1 || p_proj.y <= -1.1 || p_proj.y >= 1.1))) {
     return false;
   }
 

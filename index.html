@@ -8,21 +8,19 @@
                            integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
                            crossorigin="anonymous">
 
-    <title>WebGPU Webpack + TypeScript Starter</title>
+    <title>WebGPU Gaussian Splatting</title>
 </head>
 <body>
     <div class="container mt-4">
         <div class="row">
             <div style="display: none" id="loading-popup">Loading .ply, this may take from seconds to a couple of minutes</div>
             <div class="col-12 text-center">
-                <h4>WebGPU Webpack + TypeScript Starter</h4>
+                <h4>WebGPU Gaussian Splatting</h4>
                 <canvas id="webgpu-canvas" class="img-fluid" width="800" height="800"></canvas>
                 <select name="tileSize" id="tileSize">
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="4">4</option>
                     <option value="8">8</option>
                     <option value="16">16</option>
+                    <option value="32">32</option>
                 </select>
                 <button style="display:block" onclick="document.getElementById('plyButton').click()">Choose
                     point_cloud.ply</button>

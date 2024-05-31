@@ -1,4 +1,3 @@
-// We use webpack to package our shaders as string resources that we can import
 import { CameraFileParser, InteractiveCamera } from "./camera";
 import { loadFileAsArrayBuffer, PackedGaussians } from "./ply";
 import { Renderer } from "./renderer";
@@ -17,6 +16,7 @@ import { Renderer } from "./renderer";
         requiredLimits: {
             maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
             maxBufferSize: adapter.limits.maxBufferSize,
+            maxComputeInvocationsPerWorkgroup: adapter.limits.maxComputeInvocationsPerWorkgroup,
         }
     });
 

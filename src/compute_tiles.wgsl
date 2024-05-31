@@ -28,10 +28,15 @@ struct Uniforms {
 
 // the workgroup size needs to be the tile size
 @compute @workgroup_size(TILE_SIZE_MACRO, TILE_SIZE_MACRO)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(workgroup_id) w_id: vec3<u32>, @builtin(num_workgroups) n_wgs: vec3<u32>) {
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) w_id: vec3<u32>, @builtin(num_workgroups) n_wgs: vec3<u32>) {
     if (global_id.x > canvas_size.x || global_id.y > canvas_size.y) {
         return;
     }
+    // for coloring borders of tiles for debugging
+    // if (local_id.x == TILE_SIZE_MACRO - 1 || local_id.y == TILE_SIZE_MACRO - 1) {
+    //     textureStore(render_target, global_id.xy, vec4<f32>(1.0, 0.0, 0.0, 1.0f));
+    //     return;
+    // }
     let pixel = vec2<f32>(global_id.xy);
     let tile_id = w_id.x + w_id.y * n_wgs.x;
     var start_index : u32 = 0;
@@ -67,97 +72,4 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(workgroup_
     // just to keep uniforms active for now
     let color2 = vec2<f32>(w_id.xy) / vec2<f32>(canvas_size / tile_size);
     let v = uniforms.view_matrix;
-}
-
-fn compute_cov3d(log_scale: vec3<f32>, rot: vec4<f32>) -> array<f32, 6> {
-
-  let modifier = uniforms.scale_modifier;
-
-  let S = mat3x3<f32>(
-    exp(log_scale.x) * modifier, 0., 0.,
-    0., exp(log_scale.y) * modifier, 0.,
-    0., 0., exp(log_scale.z) * modifier,
-  );
-  
-  // Normalize quaternion to get valid rotation
-  // let quat = rot;
-  let quat = rot / length(rot);
-  let r = quat.x;
-  let x = quat.y;
-  let y = quat.z;
-  let z = quat.w;
-
-  let R = mat3x3(
-    1. - 2. * (y * y + z * z), 2. * (x * y - r * z), 2. * (x * z + r * y),
-    2. * (x * y + r * z), 1. - 2. * (x * x + z * z), 2. * (y * z - r * x),
-    2. * (x * z - r * y), 2. * (y * z + r * x), 1. - 2. * (x * x + y * y),
-  );
-
-  let M = S * R;
-  let Sigma = transpose(M) * M;
-
-  return array<f32, 6> (
-    Sigma[0][0],
-    Sigma[0][1],
-    Sigma[0][2],
-    Sigma[1][1],
-    Sigma[1][2],
-    Sigma[2][2],
-  );
-}
-
-
-fn compute_cov2d(position: vec3<f32>, log_scale: vec3<f32>, rot: vec4<f32>) -> vec3<f32> {
-  let cov3d = compute_cov3d(log_scale, rot);
-
-  // The following models the steps outlined by equations 29
-	// and 31 in "EWA Splatting" (Zwicker et al., 2002). 
-	// Additionally considers aspect / scaling of viewport.
-	// Transposes used to account for row-/column-major conventions.
-
-  var t = uniforms.view_matrix * vec4<f32>(position, 1.0);
-  // let focal_x = 1.0;
-  // let focal_y = 1.0;
-  let focal_x = uniforms.focal_x;
-  let focal_y = uniforms.focal_y;
-
-  // Orig
-  let limx = 1.3 * uniforms.tan_fovx;
-  let limy = 1.3 * uniforms.tan_fovy;
-  let txtz = t.x / t.z;
-  let tytz = t.y / t.z;
-
-  t.x = min(limx, max(-limx, txtz)) * t.z;
-  t.y = min(limy, max(-limy, tytz)) * t.z;
-
-  let J = mat3x3(
-    focal_x / t.z,  0., -(focal_x * t.x) / (t.z * t.z),
-    0., focal_y / t.z, -(focal_y * t.y) / (t.z * t.z),
-    0., 0., 0.,
-  );
-
-  // this includes the transpose
-  let W = mat3x3(
-    uniforms.view_matrix[0][0], uniforms.view_matrix[1][0], uniforms.view_matrix[2][0],
-    uniforms.view_matrix[0][1], uniforms.view_matrix[1][1], uniforms.view_matrix[2][1],
-    uniforms.view_matrix[0][2], uniforms.view_matrix[1][2], uniforms.view_matrix[2][2],
-  );
-
-  let T = W * J;
-
-  let Vrk = mat3x3(
-    cov3d[0], cov3d[1], cov3d[2],
-    cov3d[1], cov3d[3], cov3d[4],
-    cov3d[2], cov3d[4], cov3d[5],
-  );
-
-  var cov = transpose(T) * transpose(Vrk) * T;
-
-  // Apply low-pass filter: every Gaussian should be at least
-  // one pixel wide/high. Discard 3rd row and column.
-  cov[0][0] += 0.3;
-  cov[1][1] += 0.3;
-
-
-  return vec3(cov[0][0], cov[0][1], cov[1][1]);
 }
