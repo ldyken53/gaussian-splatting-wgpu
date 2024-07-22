@@ -590,8 +590,7 @@ export class Renderer {
         commandEncoder.clearBuffer(this.tileCountBuffer);
         commandEncoder.clearBuffer(this.gaussianDataBuffer);
         commandEncoder.clearBuffer(this.rangesBuffer);
-        this.tileIDBuffer.destroy();
-        this.gaussianIDBuffer.destroy();
+        sortBuffers.destroy();
         commandEncoder.copyTextureToTexture(
             { texture: this.renderTargetCopy}, 
             { texture: this.renderTarget},

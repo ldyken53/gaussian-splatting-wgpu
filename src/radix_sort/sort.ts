@@ -385,4 +385,13 @@ class SortBuffers {
     keysValidSize(): number {
         return this.length * RS_KEYVAL_SIZE;
     }
+
+    destroy() {
+        this.keysA.destroy();
+        this.keysB.destroy();
+        this.payloadA.destroy();
+        this.payloadB.destroy();
+        this.internalMemBuffer.destroy();
+        this.uniformBuffer.destroy();
+    }
 }
