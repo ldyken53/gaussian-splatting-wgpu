@@ -1,6 +1,7 @@
 import { CameraFileParser, InteractiveCamera } from "./camera";
 import { loadFileAsArrayBuffer, PackedGaussians } from "./ply";
 import { Renderer } from "./renderer";
+import { guessWorkgroupSize } from "./radix_sort/utils";
 
 (async () => {
     if (navigator.gpu === undefined) {
@@ -17,9 +18,10 @@ import { Renderer } from "./renderer";
             maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
             maxBufferSize: adapter.limits.maxBufferSize,
             maxComputeInvocationsPerWorkgroup: adapter.limits.maxComputeInvocationsPerWorkgroup,
+            maxComputeWorkgroupStorageSize: adapter.limits.maxComputeWorkgroupStorageSize
         }
     });
-
+    
     // Grab needed HTML elements
     const plyFileInput = document.getElementById('plyButton') as HTMLInputElement;
     const loadingPopup = document.getElementById('loading-popup')! as HTMLDivElement;
