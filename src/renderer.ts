@@ -2,7 +2,6 @@ import { Mat4 } from 'wgpu-matrix';
 
 import { PackedGaussians } from './ply';
 import { Struct, f32, mat4x4, vec3 } from './packing';
-import { RadixSorter } from './radix_sort';
 import { ExclusiveScanPipeline, ExclusiveScanner } from './exclusive_scan';
 import { InteractiveCamera } from './camera';
 
@@ -45,7 +44,7 @@ export class Renderer {
     device: GPUDevice;
     contextGpu: GPUCanvasContext;
 
-    radixSorter: RadixSorter;
+    sorter: GPUSorter;
     scanPipeline: ExclusiveScanPipeline;
     scanTileCounts: ExclusiveScanner;
 
@@ -112,7 +111,7 @@ export class Renderer {
         }
         this.contextGpu = contextGpu;
 
-        this.radixSorter = new RadixSorter(this.device);
+        this.sorter = new GPUSorter(this.device, 32);
         this.scanPipeline = new ExclusiveScanPipeline(this.device);
 
         this.lastDraw = performance.now();
@@ -437,20 +436,10 @@ export class Renderer {
         //     var tileCountVals = new Uint32Array(dbgBuffer.getMappedRange());
         //     console.log(tileCountVals);
         // }
-        const sorter = new GPUSorter(this.device, 32);
-        const sortBuffers = sorter.createSortBuffers(this.numIntersections);
+        const sortBuffers = this.sorter.createSortBuffers(this.numIntersections);
         this.tileIDBuffer = sortBuffers.keys;
         this.gaussianIDBuffer = sortBuffers.values;
-        // this.tileIDBuffer = this.device.createBuffer({
-        //     size: this.radixSorter.getAlignedSize(this.numIntersections) * 4, // u32
-        //     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-        //     label: "renderer.tileIDBuffer"  
-        // });
-        // this.gaussianIDBuffer = this.device.createBuffer({
-        //     size: this.radixSorter.getAlignedSize(this.numIntersections) * 4, // u32
-        //     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-        //     label: "renderer.gaussianIDBuffer"  
-        // });
+
         this.writeTileIDsBindGroup = this.device.createBindGroup({
             layout: this.writeTileIDsPipeline.getBindGroupLayout(0),
             entries: [
@@ -481,10 +470,9 @@ export class Renderer {
         // sort gaussian ids by the tile ids so each tile has all the gaussians acting on it
         var start = performance.now();
         const sortEncoder = this.device.createCommandEncoder();
-        sorter.sort(sortEncoder, this.device.queue, sortBuffers);
+        this.sorter.sort(sortEncoder, this.device.queue, sortBuffers);
         this.device.queue.submit([sortEncoder.finish()]);
         await this.device.queue.onSubmittedWorkDone();
-        // await this.radixSorter.sort(this.tileIDBuffer, this.gaussianIDBuffer, this.numIntersections, false, false);
         var end = performance.now();
         console.log(`Sort took ${end - start} ms`);
 
