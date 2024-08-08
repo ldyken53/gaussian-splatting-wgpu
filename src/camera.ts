@@ -77,36 +77,6 @@ export class Camera {
     }
 
     static default(canvas: HTMLCanvasElement): Camera {
-        // return cameraFromJSON({
-        //     "id": 0,
-        //     "img_name": "2020_08_01__11_38_23",
-        //     "width": 2390,
-        //     "height": 2393,
-        //     "position": [
-        //         -0.6314126877625473,
-        //         -1.6540744433177723,
-        //         -5.05432650449913
-        //     ],
-        //     "rotation": [
-        //         [
-        //             0.9640601150087581,
-        //             0.02136179240680476,
-        //             0.2648240330379194
-        //         ],
-        //         [
-        //             -0.07282826562785993,
-        //             0.9798307346969114,
-        //             0.1860853972480072
-        //         ],
-        //         [
-        //             -0.25550760923099397,
-        //             -0.19868418449509095,
-        //             0.9461714730727103
-        //         ]
-        //     ],
-        //     "fy": 2590.0725949481944,
-        //     "fx": 2594.130896557771
-        // }, canvas.width, canvas.height);
         const canvasW = 800
         const canvasH = 800
 
@@ -351,24 +321,6 @@ function worldToCamFromRT(R: Mat3, t: Vec3): Mat4 {
 
 // converting camera coordinate systems is always black magic :(
 function cameraFromJSON(rawCamera: CameraRaw, canvasW: number, canvasH: number): Camera {
-    // const fovX = focal2fov(rawCamera.fx, rawCamera.width);
-    // const fovY = focal2fov(rawCamera.fy, rawCamera.height);
-    // const projectionMatrix = getProjectionMatrix(0.2, 100, fovX, fovY);
-
-    // const R = mat3.create(...rawCamera.rotation.flat());
-    // const T = rawCamera.position;
-
-    // const viewMatrix = worldToCamFromRT(R, T);
-
-    // return new Camera(
-    //     canvasH,
-    //     canvasW,
-    //     viewMatrix,
-    //     projectionMatrix,
-    //     rawCamera.fx,
-    //     rawCamera.fy,
-    //     Math.max(canvasW / rawCamera.width, canvasH / rawCamera.height),
-    // );
     const canvW = 800;
     const canvH = 800;
 
