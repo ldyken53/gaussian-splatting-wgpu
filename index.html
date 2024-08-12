@@ -8,23 +8,23 @@
                            integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
                            crossorigin="anonymous">
 
-    <title>WebGPU Gaussian Splatting</title>
+    <title>WebGPU Volume Splatting</title>
 </head>
 <body>
     <div class="container mt-4">
         <div class="row">
-            <div style="display: none" id="loading-popup">Loading .ply, this may take from seconds to a couple of minutes</div>
+            <div style="display: none" id="loading-popup">Loading .off, this may take from seconds to a couple of minutes</div>
             <div class="col-12 text-center">
-                <h4>WebGPU Gaussian Splatting</h4>
+                <h4>WebGPU Volume Splatting</h4>
                 <canvas id="webgpu-canvas" class="img-fluid" width="800" height="800"></canvas>
                 <select name="tileSize" id="tileSize">
                     <option value="8">8</option>
                     <option value="16">16</option>
                     <option value="32">32</option>
                 </select>
-                <button style="display:block" onclick="document.getElementById('plyButton').click()">Choose
-                    point_cloud.ply</button>
-                <input type="file" accept=".ply" style="display:none" id="plyButton" />
+                <button style="display:block" onclick="document.getElementById('offButton').click()">Choose
+                    volume.off</button>
+                <input type="file" accept=".off" style="display:none" id="offButton" />
                 <label for="tileSize">Tile Size</label>
                 <button style="display:block" onclick="document.getElementById('cameraButton').click()">Choose
                     cameras.json</button>

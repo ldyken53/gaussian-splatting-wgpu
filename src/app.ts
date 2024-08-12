@@ -1,5 +1,5 @@
 import { CameraFileParser, InteractiveCamera } from "./camera";
-import { loadFileAsArrayBuffer, PackedGaussians } from "./ply";
+import { loadFileAsText, Volume } from "./off";
 import { Renderer } from "./renderer";
 import { guessWorkgroupSize } from "./radix_sort/utils";
 
@@ -23,7 +23,7 @@ import { guessWorkgroupSize } from "./radix_sort/utils";
     });
     
     // Grab needed HTML elements
-    const plyFileInput = document.getElementById('plyButton') as HTMLInputElement;
+    const offFileInput = document.getElementById('offButton') as HTMLInputElement;
     const loadingPopup = document.getElementById('loading-popup')! as HTMLDivElement;
     const tileSizeSlider = document.getElementById('tileSize') as HTMLInputElement;
     tileSizeSlider.value = "16";
@@ -33,27 +33,28 @@ import { guessWorkgroupSize } from "./radix_sort/utils";
     let interactiveCamera = InteractiveCamera.default(canvas);
     var currentRenderer: Renderer;
 
-    function handlePlyChange(event: any) {
+    function handleOffChange(event: any) {
         const file = event.target.files[0];
     
-        async function onFileLoad(arrayBuffer: ArrayBuffer) {
+        async function onFileLoad(text: string) {
+            console.log(text);
             if (currentRenderer) {
                 await currentRenderer.destroy();
             }
 
-            const gaussians = new PackedGaussians(arrayBuffer);
-            const renderer = new Renderer(canvas, interactiveCamera, device, gaussians, parseInt(tileSizeSlider.value));
+            const volume = new Volume(text);
+            const renderer = new Renderer(canvas, interactiveCamera, device, volume, parseInt(tileSizeSlider.value));
             currentRenderer = renderer;
             loadingPopup.style.display = 'none'; // hide loading popup
         }
     
         if (file) {
             loadingPopup.style.display = 'block'; // show loading popup
-            loadFileAsArrayBuffer(file)
+            loadFileAsText(file)
                 .then(onFileLoad);
         }
     }
-    plyFileInput!.addEventListener('change', handlePlyChange);
+    offFileInput!.addEventListener('change', handleOffChange);
     new CameraFileParser(
         cameraFileInput,
         cameraList,

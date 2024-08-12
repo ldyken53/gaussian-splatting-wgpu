@@ -72,7 +72,6 @@ export class GPUSorter {
         let rs_mem_sweep_0_offset = 0;
         let rs_mem_sweep_1_offset = rs_mem_sweep_0_offset + rs_sweep_0_size;
         let rs_mem_sweep_2_offset = rs_mem_sweep_1_offset + rs_sweep_1_size;
-        console.log(rs_mem_sweep_2_offset);
 
         this.bindGroupLayout = this.device.createBindGroupLayout({
             label: "radix sort bind group layout",
@@ -181,8 +180,6 @@ export class GPUSorter {
     public createKeyvalBuffers(length: number): [GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer] {
         // add padding so that our buffer size is a multiple of keys_per_workgroup
         let count_ru_histo = this.keysBufferSize(length) * RS_KEYVAL_SIZE;
-        console.log(this.keysBufferSize(length));
-        console.log(count_ru_histo);
 
         // creating the two needed buffers for sorting
         let keys = this.device.createBuffer({

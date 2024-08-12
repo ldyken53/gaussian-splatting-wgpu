@@ -5,12 +5,13 @@ import { Struct, f32, mat4x4, vec3 } from './packing';
 import { ExclusiveScanPipeline, ExclusiveScanner } from './exclusive_scan';
 import { InteractiveCamera } from './camera';
 
-import process_gaussians from "./process_gaussians.wgsl";
+import process_tetras from "./process_tetras.wgsl";
 import compute_tiles from "./compute_tiles.wgsl";
 import compute_ranges from "./compute_ranges.wgsl";
 import render from "./render.wgsl";
 import write_tile_ids from "./write_tile_ids.wgsl";
 import { GPUSorter } from './radix_sort/sort';
+import { Volume } from './off';
 
 const uniformLayout = new Struct([
     ['viewMatrix', new mat4x4(f32)],
@@ -36,7 +37,8 @@ export class Renderer {
     canvas: HTMLCanvasElement;
     interactiveCamera: InteractiveCamera;
 
-    numGaussians: number;
+    numPoints: number;
+    numTetra: number;
     tileSize: number;
     numIntersections: number;
     numFrames: number;
@@ -50,14 +52,12 @@ export class Renderer {
 
     uniformBuffer: GPUBuffer; // camera uniforms
     pointDataBuffer: GPUBuffer;
-    gaussianDataBuffer: GPUBuffer;
-    gaussianIDBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by tile and depth)
+    tetraIDBuffer: GPUBuffer; // buffer of tetra indices (used for sort by tile and depth)
     tileCountBuffer: GPUBuffer; // used to count the number of tile intersections for each Gaussian
     tileOffsetBuffer: GPUBuffer; // filled with output of prefix sum on tileCountBuffer
     tileIDBuffer: GPUBuffer; // tile IDs for each gaussian
     rangesBuffer: GPUBuffer; // tile ranges for each pixel, pixel index written with stopping point in sorted gaussian buffer
 
-    numGaussianBuffer: GPUBuffer;
     canvasSizeBuffer: GPUBuffer;
     tileSizeBuffer: GPUBuffer;
     numTilesBuffer: GPUBuffer;
@@ -67,13 +67,11 @@ export class Renderer {
 
     renderPipelineBindGroup: GPUBindGroup;
     pointDataBindGroup: GPUBindGroup;
-    processGaussiansBindGroup: GPUBindGroup;
     writeTileIDsBindGroup: GPUBindGroup;
     computeTilesBindGroup: GPUBindGroup;
     computeRangesBindGroup: GPUBindGroup;
 
     renderPipeline: GPURenderPipeline;
-    processGaussiansPipeline: GPUComputePipeline;
     writeTileIDsPipeline: GPUComputePipeline;
     computeTilesPipeline: GPUComputePipeline;
     computeRangesPipeline: GPUComputePipeline;
@@ -85,6 +83,13 @@ export class Renderer {
     lastDraw: number;
 
     destroyCallback: (() => void) | null = null;
+    tetraDataBuffer: GPUBuffer;
+    numTetraBuffer: GPUBuffer;
+    tetraDepthBuffer: GPUBuffer;
+    tetraRectBuffer: GPUBuffer;
+    processTetraPipeline: GPUComputePipeline;
+    processTetraBindGroup: GPUBindGroup;
+    tetraUVBuffer: GPUBuffer;
 
     // destroy the renderer and return a promise that resolves when it's done (after the next frame)
     public async destroy(): Promise<void> {
@@ -97,7 +102,7 @@ export class Renderer {
         canvas: HTMLCanvasElement,
         interactiveCamera: InteractiveCamera,
         device: GPUDevice,
-        gaussians: PackedGaussians,
+        volume: Volume,
         tileSize: number
     ) {
         this.tileSize = tileSize;
@@ -116,8 +121,9 @@ export class Renderer {
 
         this.lastDraw = performance.now();
 
-        this.numGaussians = gaussians.numGaussians;
-        console.log(`Num Gaussians: ${this.numGaussians}`);
+        this.numPoints = volume.numPoints;
+        this.numTetra = volume.numTetra;
+        console.log(`Num points: ${this.numPoints}, num tetra: ${this.numTetra}`);
 
         const presentationFormat = "rgba8unorm" as GPUTextureFormat;
 
@@ -128,42 +134,62 @@ export class Renderer {
         });
 
         this.pointDataBuffer = this.device.createBuffer({
-            size: gaussians.gaussianArrayLayout.size,
+            size: volume.points.byteLength,
             usage: GPUBufferUsage.STORAGE,
             mappedAtCreation: true,
             label: "renderer.pointDataBuffer",
         });
-        new Uint8Array(this.pointDataBuffer.getMappedRange()).set(new Uint8Array(gaussians.gaussiansBuffer));
+        new Float32Array(this.pointDataBuffer.getMappedRange()).set(volume.points);
         this.pointDataBuffer.unmap();
 
+        this.tetraDataBuffer = this.device.createBuffer({
+            size: volume.tetra.byteLength,
+            usage: GPUBufferUsage.STORAGE,
+            mappedAtCreation: true,
+            label: "renderer.tetraDataBuffer",
+        });
+        new Uint32Array(this.tetraDataBuffer.getMappedRange()).set(volume.tetra);
+        this.tetraDataBuffer.unmap();
+
+        this.tetraRectBuffer = this.device.createBuffer({
+            size: this.numTetra * 4 * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+            label: "renderer.tetraRectBuffer",
+        });
+
+        this.tetraDepthBuffer = this.device.createBuffer({
+            size: this.numTetra * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+            label: "renderer.tetraDepthBuffer",
+        });
+
+        this.tetraUVBuffer = this.device.createBuffer({
+            size: this.numTetra * 4 * 2 * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+            label: "renderer.tetraDepthBuffer",
+        });
+
         this.tileCountBuffer = this.device.createBuffer({
-            size: this.numGaussians * 4, // u32
+            size: this.numTetra * 4, // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.tileCountBuffer"
         });
 
         this.tileOffsetBuffer = this.device.createBuffer({
-            size: this.scanPipeline.getAlignedSize(this.numGaussians) * 4, // u32
+            size: this.scanPipeline.getAlignedSize(this.numTetra) * 4, // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.tileOffsetBuffer"
         });
 
         this.scanTileCounts = this.scanPipeline.prepareGPUInput(
             this.tileOffsetBuffer,
-            this.scanPipeline.getAlignedSize(this.numGaussians));
+            this.scanPipeline.getAlignedSize(this.numTetra));
 
-        // buffer for the range of tiles for each pixel
+        // buffer for the range of tiles for each tetra
         this.rangesBuffer = this.device.createBuffer({
             size: Math.ceil(this.canvas.width / this.tileSize)  * Math.ceil(this.canvas.height / this.tileSize) * 4, // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.rangesBuffer"
-        });
-
-        // buffer for gaussian info needed for computing tiles
-        this.gaussianDataBuffer = this.device.createBuffer({
-            size: this.numGaussians * (16) * 4, // vec2, vec3, vec3, f32, vec4 with alignment rules
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-            label: "renderer.gaussianDataBuffer"
         });
 
         // create a GPU buffer for the uniform data.
@@ -173,16 +199,16 @@ export class Renderer {
             label: "renderer.uniformBuffer",
         });
 
-        // buffer for the num gaussians, set once
-        this.numGaussianBuffer = this.device.createBuffer({
+        // buffer for the num tetra, set once
+        this.numTetraBuffer = this.device.createBuffer({
             size: 4,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-            label: "renderer.numGaussianBuffer"
+            label: "renderer.numTetraBuffer"
         });
         this.device.queue.writeBuffer(
-            this.numGaussianBuffer,
+            this.numTetraBuffer,
             0,
-            new Uint32Array([this.numGaussians]),
+            new Uint32Array([this.numTetra]),
             0,
             1
         );
@@ -201,7 +227,7 @@ export class Renderer {
             2
         );
 
-        // buffer for the tile size, set once, currently hardcoded
+        // buffer for the tile size, set once
         this.tileSizeBuffer = this.device.createBuffer({
             size: 1 * 4,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -229,25 +255,28 @@ export class Renderer {
             1
         );
 
-        this.processGaussiansPipeline = this.device.createComputePipeline({
+        this.processTetraPipeline = this.device.createComputePipeline({
             layout: "auto",
             compute: {
                 module: this.device.createShaderModule({
-                    code: process_gaussians,
+                    code: process_tetras,
                 }),
                 entryPoint: "main",
             },
         });
-        this.processGaussiansBindGroup = this.device.createBindGroup({
-            layout: this.processGaussiansPipeline.getBindGroupLayout(0),
+        this.processTetraBindGroup = this.device.createBindGroup({
+            layout: this.processTetraPipeline.getBindGroupLayout(0),
             entries: [
                 {binding: 0, resource: {buffer: this.pointDataBuffer}},
-                {binding: 1, resource: {buffer: this.gaussianDataBuffer}},
+                {binding: 1, resource: {buffer: this.tetraDataBuffer}},
                 {binding: 2, resource: {buffer: this.tileCountBuffer}},
-                {binding: 3, resource: {buffer: this.uniformBuffer}},
-                {binding: 4, resource: {buffer: this.numGaussianBuffer}},
-                {binding: 5, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 6, resource: {buffer: this.tileSizeBuffer}}
+                {binding: 3, resource: {buffer: this.tetraRectBuffer}},
+                {binding: 4, resource: {buffer: this.tetraDepthBuffer}},
+                {binding: 5, resource: {buffer: this.tetraUVBuffer}},
+                {binding: 6, resource: {buffer: this.uniformBuffer}},
+                {binding: 7, resource: {buffer: this.numTetraBuffer}},
+                {binding: 8, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 9, resource: {buffer: this.tileSizeBuffer}}
             ]
         });
 
@@ -330,13 +359,15 @@ export class Renderer {
 
         this.uniformBuffer.destroy();
         this.pointDataBuffer.destroy();
-        this.gaussianDataBuffer.destroy();
-        this.gaussianIDBuffer.destroy();
+        this.tetraDataBuffer.destroy();
+        this.tetraDepthBuffer.destroy();
+        this.tetraRectBuffer.destroy();
+        this.numTetraBuffer.destroy();
+        this.tetraIDBuffer.destroy();
         this.tileCountBuffer.destroy();
         this.tileOffsetBuffer.destroy();
         this.tileIDBuffer.destroy();
         this.rangesBuffer.destroy();
-        this.numGaussianBuffer.destroy();
         this.canvasSizeBuffer.destroy();
         this.tileSizeBuffer.destroy();
         this.numTilesBuffer.destroy();
@@ -393,73 +424,123 @@ export class Renderer {
 
         { 
             var start = performance.now();
-            // compute the tile counts and precompute per view properties of each gaussian (conic, depth, etc.)
+            // compute the tile counts, depths, and bounding rect (in tile space) of each tetra
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
-            passEncoder.setPipeline(this.processGaussiansPipeline);
-            passEncoder.setBindGroup(0, this.processGaussiansBindGroup);
-            passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 256));
+            passEncoder.setPipeline(this.processTetraPipeline);
+            passEncoder.setBindGroup(0, this.processTetraBindGroup);
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numTetra / 256));
             passEncoder.end();
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
             var end = performance.now();
-            console.log(`Compute Gaussians depth took ${end - start} ms`);
+            console.log(`Process tetra took ${end - start} ms`);
         }
 
-        // find the offsets for each gaussian to write its tile intersections
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.tileCountBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
+
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.tileCountBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
+
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+        //     var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
+        //     console.log(debugValsf);
+        // }
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.tetraRectBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
+
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.tetraRectBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
+
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+        //     var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
+        //     console.log(debugValsf);
+        // }
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.tetraDepthBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
+
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.tetraDepthBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
+
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+        //     var debugVals = new Float32Array(dbgBuffer.getMappedRange());
+        //     console.log(debugVals);
+        // }
+
+        // find the offsets for each tetra to write its tile intersections
         var commandEncoder = this.device.createCommandEncoder();
         // we scan the tileOffsetBuffer, so copy the tile count information over
         commandEncoder.copyBufferToBuffer(this.tileCountBuffer,
             0,
             this.tileOffsetBuffer,
             0,
-            this.numGaussians * 4);
+            this.numTetra * 4);
         this.device.queue.submit([commandEncoder.finish()]);
         var start = performance.now();
-        this.numIntersections = await this.scanTileCounts.scan(this.numGaussians);
+        this.numIntersections = await this.scanTileCounts.scan(this.numTetra);
         var end = performance.now();
         console.log(`Scan tile counts took ${end - start} ms`);
         console.log(`Found ${this.numIntersections} intersections`);
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.tileOffsetBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.tileOffsetBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
 
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.tileOffsetBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.tileOffsetBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
 
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-        //     var tileCountVals = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(tileCountVals);
-        // }
+            var tileCountVals = new Uint32Array(dbgBuffer.getMappedRange());
+            console.log(tileCountVals);
+        }
         const sortBuffers = this.sorter.createSortBuffers(this.numIntersections);
         this.tileIDBuffer = sortBuffers.keys;
-        this.gaussianIDBuffer = sortBuffers.values;
+        this.tetraIDBuffer = sortBuffers.values;
 
         this.writeTileIDsBindGroup = this.device.createBindGroup({
             layout: this.writeTileIDsPipeline.getBindGroupLayout(0),
             entries: [
                 {binding: 0, resource: {buffer: this.tileOffsetBuffer}},
-                {binding: 1, resource: {buffer: this.gaussianDataBuffer}},
-                {binding: 2, resource: {buffer: this.tileIDBuffer}},
-                {binding: 3, resource: {buffer: this.gaussianIDBuffer}},
-                {binding: 4, resource: {buffer: this.numGaussianBuffer}},
-                {binding: 5, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 6, resource: {buffer: this.tileSizeBuffer}},
+                {binding: 1, resource: {buffer: this.tetraRectBuffer}},
+                {binding: 2, resource: {buffer: this.tetraDepthBuffer}},
+                {binding: 3, resource: {buffer: this.tileIDBuffer}},
+                {binding: 4, resource: {buffer: this.tetraIDBuffer}},
+                {binding: 5, resource: {buffer: this.numTetraBuffer}},
+                {binding: 6, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 7, resource: {buffer: this.tileSizeBuffer}},
             ]
         });
         { 
-            // write tile/depth combined IDs at computed offsets for each gaussian
+            // write tile/depth combined IDs at computed offsets for each tetra
             var start = performance.now();
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.writeTileIDsPipeline);
             passEncoder.setBindGroup(0, this.writeTileIDsBindGroup);
-            passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 256));
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numTetra / 256));
             passEncoder.end();
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
@@ -467,7 +548,7 @@ export class Renderer {
             console.log(`Write Tile IDs took ${end - start} ms`)
         }
 
-        // sort gaussian ids by the tile ids so each tile has all the gaussians acting on it
+        // sort tetra ids by the tile ids so each tile has all the tetras acting on it
         var start = performance.now();
         const sortEncoder = this.device.createCommandEncoder();
         this.sorter.sort(sortEncoder, this.device.queue, sortBuffers);
@@ -475,6 +556,40 @@ export class Renderer {
         await this.device.queue.onSubmittedWorkDone();
         var end = performance.now();
         console.log(`Sort took ${end - start} ms`);
+
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.tetraIDBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
+
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.tetraIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
+
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+        //     var tetraIDs = new Uint32Array(dbgBuffer.getMappedRange());
+        //     console.log(tetraIDs);
+        // }
+
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.tileIDBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
+
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
+
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+        //     var tileIDs = new Uint32Array(dbgBuffer.getMappedRange());
+        //     console.log(tileIDs);
+        // }
 
         { 
             // compute the ranges of IDs for each tile to work on
@@ -501,22 +616,22 @@ export class Renderer {
             console.log(`Compute tile ranges took ${end - start} ms`);
         }
 
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.tileIDBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
+        // // {
+        // //     var dbgBuffer = this.device.createBuffer({
+        // //         size: this.tileIDBuffer.size,
+        // //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        // //     });
 
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
+        // //     var commandEncoder = this.device.createCommandEncoder();
+        // //     commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        // //     this.device.queue.submit([commandEncoder.finish()]);
+        // //     await this.device.queue.onSubmittedWorkDone();
 
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+        // //     await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-        //     var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(debugValsf);
-        // }
+        // //     var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
+        // //     console.log(debugValsf);
+        // // }
 
         { 
             // compute the final image - each pixel accumulates the colors of the gaussians in its tile
@@ -526,11 +641,12 @@ export class Renderer {
                 entries: [
                     {binding: 0, resource: this.renderTarget.createView()},
                     {binding: 1, resource: {buffer: this.rangesBuffer}},
-                    {binding: 2, resource: {buffer: this.gaussianIDBuffer}},
-                    {binding: 3, resource: {buffer: this.gaussianDataBuffer}},
-                    {binding: 4, resource: {buffer: this.canvasSizeBuffer}},
-                    {binding: 5, resource: {buffer: this.tileSizeBuffer}},
-                    {binding: 6, resource: {buffer: this.uniformBuffer}},
+                    {binding: 2, resource: {buffer: this.tetraIDBuffer}},
+                    {binding: 3, resource: {buffer: this.tetraDataBuffer}},
+                    {binding: 4, resource: {buffer: this.tetraUVBuffer}},
+                    {binding: 5, resource: {buffer: this.canvasSizeBuffer}},
+                    {binding: 6, resource: {buffer: this.tileSizeBuffer}},
+                    {binding: 7, resource: {buffer: this.uniformBuffer}},
                 ]
             });
             const commandEncoder = this.device.createCommandEncoder();
@@ -576,7 +692,8 @@ export class Renderer {
         // clear everything for next pass
         var commandEncoder = this.device.createCommandEncoder();
         commandEncoder.clearBuffer(this.tileCountBuffer);
-        commandEncoder.clearBuffer(this.gaussianDataBuffer);
+        commandEncoder.clearBuffer(this.tetraRectBuffer);
+        commandEncoder.clearBuffer(this.tetraDepthBuffer);
         commandEncoder.clearBuffer(this.rangesBuffer);
         sortBuffers.destroy();
         commandEncoder.copyTextureToTexture(
