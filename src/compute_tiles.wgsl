@@ -13,10 +13,11 @@ struct Uniforms {
 @group(0) @binding(1) var<storage, read> ranges: array<u32>;
 @group(0) @binding(2) var<storage, read> indices: array<u32>;
 @group(0) @binding(3) var<storage, read> tetra_data: array<vec4<u32>>;
-@group(0) @binding(4) var<storage, read_write> tetra_uvs: array<mat4x2<f32>>;
-@group(0) @binding(5) var<uniform> canvas_size: vec2<u32>;
-@group(0) @binding(6) var<uniform> tile_size: u32;
-@group(0) @binding(7) var<uniform> uniforms: Uniforms;
+@group(0) @binding(4) var<storage, read> point_data: array<vec4<f32>>;
+@group(0) @binding(5) var<storage, read_write> tetra_uvs: array<mat4x2<f32>>;
+@group(0) @binding(6) var<uniform> canvas_size: vec2<u32>;
+@group(0) @binding(7) var<uniform> tile_size: u32;
+@group(0) @binding(8) var<uniform> uniforms: Uniforms;
 
 // the workgroup size needs to be the tile size
 @compute @workgroup_size(TILE_SIZE_MACRO, TILE_SIZE_MACRO)
@@ -37,17 +38,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
     }
     var end_index : u32 = ranges[tile_id];
     var accumulated_color: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);  
+    let float_canvas = vec2(f32(canvas_size.x), f32(canvas_size.y));
     for (var i = start_index; i < end_index; i++) {
         let tetra = tetra_data[indices[i]];
         let uvs = tetra_uvs[indices[i]];
-        if (is_point_in_quad(pixel, uvs[0], uvs[1], uvs[2], uvs[3])) {
-            if (indices[i] == 0) {
-                accumulated_color = vec3<f32>(0.0, 0.0, 1.0);
-            } else if (indices[i] == 1) {
-                accumulated_color = vec3<f32>(0.0, 0.0, 1.0);
-            } else {
-                accumulated_color = vec3<f32>(0.0, 0.0, 1.0);
-            }
+        if (is_point_in_quad(pixel, uvs[0] * float_canvas, uvs[1] * float_canvas, uvs[2] * float_canvas, uvs[3] * float_canvas)) {
+            accumulated_color = point_data[1].xyz;
             break;
         }
     }

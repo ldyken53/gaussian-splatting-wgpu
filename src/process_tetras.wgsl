@@ -15,10 +15,11 @@ struct Uniforms {
 @group(0) @binding(3) var<storage, read_write> tetra_rects: array<vec4<u32>>;
 @group(0) @binding(4) var<storage, read_write> tetra_depths: array<f32>;
 @group(0) @binding(5) var<storage, read_write> tetra_uvs: array<mat4x2<f32>>;
-@group(0) @binding(6) var<uniform> uniforms: Uniforms;
-@group(0) @binding(7) var<uniform> num_tetra: u32;
-@group(0) @binding(8) var<uniform> canvas_size: vec2<u32>;
-@group(0) @binding(9) var<uniform> tile_size: u32;
+@group(0) @binding(6) var<storage, read_write> visible_faces: array<vec4<f32>>;
+@group(0) @binding(7) var<uniform> uniforms: Uniforms;
+@group(0) @binding(8) var<uniform> num_tetra: u32;
+@group(0) @binding(9) var<uniform> canvas_size: vec2<u32>;
+@group(0) @binding(10) var<uniform> tile_size: u32;
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -54,10 +55,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         );
         let float_canvas = vec2(f32(canvas_size.x), f32(canvas_size.y));
         let points_uv = mat4x2<f32>(
-          ((proj_posf[0].xy * (1.0 / (proj_posf[0].w + 0.0000001f))) * 0.5 + 0.5) * float_canvas,
-          ((proj_posf[1].xy * (1.0 / (proj_posf[1].w + 0.0000001f))) * 0.5 + 0.5) * float_canvas,
-          ((proj_posf[2].xy * (1.0 / (proj_posf[2].w + 0.0000001f))) * 0.5 + 0.5) * float_canvas,
-          ((proj_posf[3].xy * (1.0 / (proj_posf[3].w + 0.0000001f))) * 0.5 + 0.5) * float_canvas
+          ((proj_posf[0].xy * (1.0 / (proj_posf[0].w + 0.0000001f))) * 0.5 + 0.5),
+          ((proj_posf[1].xy * (1.0 / (proj_posf[1].w + 0.0000001f))) * 0.5 + 0.5),
+          ((proj_posf[2].xy * (1.0 / (proj_posf[2].w + 0.0000001f))) * 0.5 + 0.5),
+          ((proj_posf[3].xy * (1.0 / (proj_posf[3].w + 0.0000001f))) * 0.5 + 0.5)
+        );
+
+        // precompute which faces of the tetra face the camera
+        visible_faces[global_id.x] = vec4<f32>(
+          (is_face_visible(points_uv[0], points_uv[1], points_uv[2])),
+          (is_face_visible(points_uv[0], points_uv[1], points_uv[3])),
+          (is_face_visible(points_uv[0], points_uv[2], points_uv[3])),
+          (is_face_visible(points_uv[1], points_uv[2], points_uv[3]))
         );
 
         // TODO: find better way to do intersection check
@@ -65,10 +74,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var maxes = vec2<f32>(0.0, 0.0);
         var closest : f32 = 9.9;
         for (var i = 0; i < 4; i++) {
-          mins.x = min(mins.x, points_uv[i].x);
-          maxes.x = max(maxes.x, points_uv[i].x);
-          mins.y = min(mins.y, points_uv[i].y);
-          maxes.y = max(maxes.y, points_uv[i].y);
+          mins.x = min(mins.x, points_uv[i].x * float_canvas.x);
+          maxes.x = max(maxes.x, points_uv[i].x * float_canvas.x);
+          mins.y = min(mins.y, points_uv[i].y * float_canvas.y);
+          maxes.y = max(maxes.y, points_uv[i].y * float_canvas.y);
           closest = min(closest, view_pos[i].z);
         }
 
@@ -126,4 +135,12 @@ fn getRect(mins: vec2<f32>, maxes: vec2<f32>, num_tiles: vec2<f32>) -> vec4<u32>
   rect_max.y = u32(i32(max_y));
 
   return vec4<u32>(rect_min, rect_max);
+}
+
+fn is_face_visible(p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>) -> f32 {
+    // Calculate the normal vector of the face
+    let v1 = p2 - p1;
+    let v2 = p3 - p1;
+
+    return v1.x * v2.y - v1.y * v2.x;
 }

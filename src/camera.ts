@@ -1,4 +1,4 @@
-import { mat4, vec3, mat3, Mat4, Mat3, Vec3 } from 'wgpu-matrix';
+import { mat4, vec3, mat3, Mat4, Mat3, Vec3, Quat } from 'wgpu-matrix';
 
 // camera as loaded from JSON
 interface CameraRaw {
@@ -77,48 +77,26 @@ export class Camera {
     }
 
     static default(canvas: HTMLCanvasElement): Camera {
-        const canvasW = 800
-        const canvasH = 800
-
-        const fovFactor = 1
-
-        const fovX = focal2fov(canvasW, canvasW) / fovFactor
-        const fovY = focal2fov(canvasH, canvasH) / fovFactor
-
-        const projectionMatrix = getProjectionMatrix(0.2, 10, fovX, fovY)
-
-        const viewMatrix = mat4.create(
-        0.582345724105835,
-        -0.3235852122306824,
-        0.7372694611549377,
-        0,
-        0.23868794739246368,
-        0.9381394982337952,
-        0.22253619134426117,
-        0,
-        -0.7680802941322327,
-        0.04477229341864586,
-        0.6242981553077698,
-        0,
-        0.13517332077026367,
-        -1.1848870515823364,
-        3.3873789310455322,
-        1,
-        )
-
-        return new Camera(
-        canvasW,
-        canvasH,
-        // 1,
-        // 1,
-        viewMatrix,
-        projectionMatrix,
-        // fovX,
-        // fovY,
-        canvasW,
-        canvasH,
-        1 * fovFactor,
-        )
+        const canvW = 800
+        const canvH = 800
+        const fovX = focal2fov(canvW, canvW)
+        const fovY = focal2fov(canvH, canvH)
+      
+        const projectionMatrix = getProjectionMatrix(0.2, 100, fovX, fovY)
+      
+        const R = mat3.create(
+            0.9640601150087581, 0.02136179240680476, 
+            0.2648240330379194, -0.07282826562785993, 
+            0.9798307346969114, 0.1860853972480072, 
+            -0.25550760923099397, -0.19868418449509095, 
+            0.9461714730727103)
+        const T = [0, 0, -5.05432650449913]
+      
+        const viewMatrix = worldToCamFromRT(R, T)
+      
+        const camera = new Camera(canvH, canvW, viewMatrix, projectionMatrix, canvW, canvH, 1)
+      
+        return camera
     }
 
     public setScale(scale: number) {
@@ -331,6 +309,8 @@ function cameraFromJSON(rawCamera: CameraRaw, canvasW: number, canvasH: number):
   
     const R = mat3.create(...rawCamera.rotation.flat())
     const T = rawCamera.position
+    console.log(...rawCamera.rotation.flat())
+    console.log(T)
   
     const viewMatrix = worldToCamFromRT(R, T)
   
@@ -384,7 +364,6 @@ export class CameraFileParser {
         jsonData.forEach((cameraJSON: any) => {
             this.currentLineId++;
             const listItem = document.createElement('li');
-            console.log(cameraJSON);
             const camera = cameraFromJSON(cameraJSON, this.canvas.width, this.canvas.height);
             listItem.textContent = cameraJSON.img_name;
             listItem.addEventListener('click', this.createCallbackForLine(camera));

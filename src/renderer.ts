@@ -90,6 +90,7 @@ export class Renderer {
     processTetraPipeline: GPUComputePipeline;
     processTetraBindGroup: GPUBindGroup;
     tetraUVBuffer: GPUBuffer;
+    visibleFacesBuffer: GPUBuffer;
 
     // destroy the renderer and return a promise that resolves when it's done (after the next frame)
     public async destroy(): Promise<void> {
@@ -165,6 +166,12 @@ export class Renderer {
 
         this.tetraUVBuffer = this.device.createBuffer({
             size: this.numTetra * 4 * 2 * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+            label: "renderer.tetraDepthBuffer",
+        });
+
+        this.visibleFacesBuffer = this.device.createBuffer({
+            size: this.numTetra * 4 * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.tetraDepthBuffer",
         });
@@ -273,10 +280,11 @@ export class Renderer {
                 {binding: 3, resource: {buffer: this.tetraRectBuffer}},
                 {binding: 4, resource: {buffer: this.tetraDepthBuffer}},
                 {binding: 5, resource: {buffer: this.tetraUVBuffer}},
-                {binding: 6, resource: {buffer: this.uniformBuffer}},
-                {binding: 7, resource: {buffer: this.numTetraBuffer}},
-                {binding: 8, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 9, resource: {buffer: this.tileSizeBuffer}}
+                {binding: 6, resource: {buffer: this.visibleFacesBuffer}},
+                {binding: 7, resource: {buffer: this.uniformBuffer}},
+                {binding: 8, resource: {buffer: this.numTetraBuffer}},
+                {binding: 9, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 10, resource: {buffer: this.tileSizeBuffer}}
             ]
         });
 
@@ -437,22 +445,22 @@ export class Renderer {
             console.log(`Process tetra took ${end - start} ms`);
         }
 
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.tileCountBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.visibleFacesBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
 
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.tileCountBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.visibleFacesBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
 
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-        //     var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(debugValsf);
-        // }
+            var debugValsf = new Float32Array(dbgBuffer.getMappedRange());
+            console.log(debugValsf);
+        }
         // {
         //     var dbgBuffer = this.device.createBuffer({
         //         size: this.tetraRectBuffer.size,
@@ -469,22 +477,25 @@ export class Renderer {
         //     var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
         //     console.log(debugValsf);
         // }
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.tetraDepthBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.tetraUVBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
 
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.tetraDepthBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.tetraUVBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
 
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-        //     var debugVals = new Float32Array(dbgBuffer.getMappedRange());
-        //     console.log(debugVals);
-        // }
+            var debugVals = new Float32Array(dbgBuffer.getMappedRange());
+            console.log(debugVals);
+            console.log(debugVals[2] - debugVals[0], debugVals[3] - debugVals[1])
+            console.log(debugVals[4] - debugVals[0], debugVals[5] - debugVals[1])
+            console.log((debugVals[2] - debugVals[0]) * (debugVals[5] - debugVals[1]) - (debugVals[4] - debugVals[0]) * (debugVals[3] - debugVals[1]))
+        }
 
         // find the offsets for each tetra to write its tile intersections
         var commandEncoder = this.device.createCommandEncoder();
@@ -643,10 +654,11 @@ export class Renderer {
                     {binding: 1, resource: {buffer: this.rangesBuffer}},
                     {binding: 2, resource: {buffer: this.tetraIDBuffer}},
                     {binding: 3, resource: {buffer: this.tetraDataBuffer}},
-                    {binding: 4, resource: {buffer: this.tetraUVBuffer}},
-                    {binding: 5, resource: {buffer: this.canvasSizeBuffer}},
-                    {binding: 6, resource: {buffer: this.tileSizeBuffer}},
-                    {binding: 7, resource: {buffer: this.uniformBuffer}},
+                    {binding: 4, resource: {buffer: this.pointDataBuffer}},
+                    {binding: 5, resource: {buffer: this.tetraUVBuffer}},
+                    {binding: 6, resource: {buffer: this.canvasSizeBuffer}},
+                    {binding: 7, resource: {buffer: this.tileSizeBuffer}},
+                    {binding: 8, resource: {buffer: this.uniformBuffer}},
                 ]
             });
             const commandEncoder = this.device.createCommandEncoder();
