@@ -1,6 +1,5 @@
 import { Mat4 } from 'wgpu-matrix';
 
-import { PackedGaussians } from './ply';
 import { Struct, f32, mat4x4, vec3 } from './packing';
 import { ExclusiveScanPipeline, ExclusiveScanner } from './exclusive_scan';
 import { InteractiveCamera } from './camera';
