@@ -56,8 +56,17 @@ export class Volume {
         // Parse the tetrahedra data
         const tetrahedraData: number[] = [];
         for (let i = this.numPoints + 1; i <= this.numPoints + this.numTetra; i++) {
-          const [idx0, idx1, idx2, idx3] = lines[i].trim().split(' ').map(Number);
-          tetrahedraData.push(idx0, idx1, idx2, idx3);
+          const idxs = lines[i].trim().split(' ').map(Number);
+          idxs.sort(function (a, b) {
+            return pointData[b * 4] - pointData[a * 4]
+          });
+          idxs.sort(function (a, b) {
+            return pointData[b * 4 + 1] - pointData[a * 4 + 1]
+          });
+          idxs.sort(function (a, b) {
+            return pointData[b * 4 + 2] - pointData[a * 4 + 2]
+          });
+          tetrahedraData.push(idxs[0], idxs[1], idxs[2], idxs[3]);
         }
         this.tetra = new Uint32Array(tetrahedraData);    
     }
