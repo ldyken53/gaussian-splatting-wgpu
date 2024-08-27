@@ -64,15 +64,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // precompute which faces of the tetra face the camera
         visible_faces[global_id.x] = vec4<f32>(
           (is_face_visible(points_uv[0], points_uv[1], points_uv[2])),
-          (is_face_visible(points_uv[0], points_uv[1], points_uv[3])),
+          (is_face_visible(points_uv[0], points_uv[3], points_uv[1])),
           (is_face_visible(points_uv[0], points_uv[2], points_uv[3])),
-          (is_face_visible(points_uv[1], points_uv[2], points_uv[3]))
+          (is_face_visible(points_uv[1], points_uv[3], points_uv[2]))
         );
 
         // TODO: find better way to do intersection check
         var mins = float_canvas;
         var maxes = vec2<f32>(0.0, 0.0);
-        var closest : f32 = 9.9;
+        var closest : f32 = 1000;
         for (var i = 0; i < 4; i++) {
           mins.x = min(mins.x, points_uv[i].x * float_canvas.x);
           maxes.x = max(maxes.x, points_uv[i].x * float_canvas.x);
@@ -138,9 +138,5 @@ fn getRect(mins: vec2<f32>, maxes: vec2<f32>, num_tiles: vec2<f32>) -> vec4<u32>
 }
 
 fn is_face_visible(p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>) -> f32 {
-    // Calculate the normal vector of the face
-    let v1 = p2 - p1;
-    let v2 = p3 - p1;
-
-    return v1.x * v2.y - v1.y * v2.x;
+    return ((p2.x - p1.x) * (p3.y - p1.y)) - ((p2.y - p1.y) * (p3.x - p1.x));
 }
