@@ -51,7 +51,7 @@ export class Renderer {
 
     uniformBuffer: GPUBuffer; // camera uniforms
     pointDataBuffer: GPUBuffer;
-    tetraIDBuffer: GPUBuffer; // buffer of tetra indices (used for sort by tile and depth)
+    faceIDBuffer: GPUBuffer; // buffer of tetra indices (used for sort by tile and depth)
     tileCountBuffer: GPUBuffer; // used to count the number of tile intersections for each Gaussian
     tileOffsetBuffer: GPUBuffer; // filled with output of prefix sum on tileCountBuffer
     tileIDBuffer: GPUBuffer; // tile IDs for each gaussian
@@ -84,8 +84,8 @@ export class Renderer {
     destroyCallback: (() => void) | null = null;
     tetraDataBuffer: GPUBuffer;
     numTetraBuffer: GPUBuffer;
-    tetraDepthBuffer: GPUBuffer;
-    tetraRectBuffer: GPUBuffer;
+    faceDepthBuffer: GPUBuffer;
+    faceRectBuffer: GPUBuffer;
     processTetraPipeline: GPUComputePipeline;
     processTetraBindGroup: GPUBindGroup;
     tetraUVBuffer: GPUBuffer;
@@ -151,16 +151,16 @@ export class Renderer {
         new Uint32Array(this.tetraDataBuffer.getMappedRange()).set(volume.tetra);
         this.tetraDataBuffer.unmap();
 
-        this.tetraRectBuffer = this.device.createBuffer({
-            size: this.numTetra * 4 * 4,
+        this.faceRectBuffer = this.device.createBuffer({
+            size: this.numTetra * 4 * 4 * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-            label: "renderer.tetraRectBuffer",
+            label: "renderer.faceRectBuffer",
         });
 
-        this.tetraDepthBuffer = this.device.createBuffer({
-            size: this.numTetra * 4,
+        this.faceDepthBuffer = this.device.createBuffer({
+            size: this.numTetra * 4 * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-            label: "renderer.tetraDepthBuffer",
+            label: "renderer.faceDepthBuffer",
         });
 
         this.tetraUVBuffer = this.device.createBuffer({
@@ -169,29 +169,23 @@ export class Renderer {
             label: "renderer.tetraUVBuffer",
         });
 
-        this.visibleFacesBuffer = this.device.createBuffer({
-            size: this.numTetra * 4 * 4,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-            label: "renderer.visibleFacesBuffer",
-        });
-
         this.tileCountBuffer = this.device.createBuffer({
-            size: this.numTetra * 4, // u32
+            size: this.numTetra * 4 * 4, // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.tileCountBuffer"
         });
 
         this.tileOffsetBuffer = this.device.createBuffer({
-            size: this.scanPipeline.getAlignedSize(this.numTetra) * 4, // u32
+            size: this.scanPipeline.getAlignedSize(this.numTetra * 4) * 4, // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.tileOffsetBuffer"
         });
 
         this.scanTileCounts = this.scanPipeline.prepareGPUInput(
             this.tileOffsetBuffer,
-            this.scanPipeline.getAlignedSize(this.numTetra));
+            this.scanPipeline.getAlignedSize(this.numTetra * 4));
 
-        // buffer for the range of tiles for each tetra
+        // buffer for the range of tiles for each face
         this.rangesBuffer = this.device.createBuffer({
             size: Math.ceil(this.canvas.width / this.tileSize)  * Math.ceil(this.canvas.height / this.tileSize) * 4, // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
@@ -276,14 +270,13 @@ export class Renderer {
                 {binding: 0, resource: {buffer: this.pointDataBuffer}},
                 {binding: 1, resource: {buffer: this.tetraDataBuffer}},
                 {binding: 2, resource: {buffer: this.tileCountBuffer}},
-                {binding: 3, resource: {buffer: this.tetraRectBuffer}},
-                {binding: 4, resource: {buffer: this.tetraDepthBuffer}},
+                {binding: 3, resource: {buffer: this.faceRectBuffer}},
+                {binding: 4, resource: {buffer: this.faceDepthBuffer}},
                 {binding: 5, resource: {buffer: this.tetraUVBuffer}},
-                {binding: 6, resource: {buffer: this.visibleFacesBuffer}},
-                {binding: 7, resource: {buffer: this.uniformBuffer}},
-                {binding: 8, resource: {buffer: this.numTetraBuffer}},
-                {binding: 9, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 10, resource: {buffer: this.tileSizeBuffer}}
+                {binding: 6, resource: {buffer: this.uniformBuffer}},
+                {binding: 7, resource: {buffer: this.numTetraBuffer}},
+                {binding: 8, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 9, resource: {buffer: this.tileSizeBuffer}}
             ]
         });
 
@@ -367,10 +360,10 @@ export class Renderer {
         this.uniformBuffer.destroy();
         this.pointDataBuffer.destroy();
         this.tetraDataBuffer.destroy();
-        this.tetraDepthBuffer.destroy();
-        this.tetraRectBuffer.destroy();
+        this.faceDepthBuffer.destroy();
+        this.faceRectBuffer.destroy();
         this.numTetraBuffer.destroy();
-        this.tetraIDBuffer.destroy();
+        this.faceIDBuffer.destroy();
         this.tileCountBuffer.destroy();
         this.tileOffsetBuffer.destroy();
         this.tileIDBuffer.destroy();
@@ -458,34 +451,34 @@ export class Renderer {
             await dbgBuffer.mapAsync(GPUMapMode.READ);
 
             var tileCounts = new Uint32Array(dbgBuffer.getMappedRange());
-            // console.log(tileCounts);
+            console.log(tileCounts);
         }
-        {
-            var dbgBuffer = this.device.createBuffer({
-                size: this.visibleFacesBuffer.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-            });
+        // {
+        //     var dbgBuffer = this.device.createBuffer({
+        //         size: this.visibleFacesBuffer.size,
+        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        //     });
 
-            var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.visibleFacesBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-            this.device.queue.submit([commandEncoder.finish()]);
-            await this.device.queue.onSubmittedWorkDone();
+        //     var commandEncoder = this.device.createCommandEncoder();
+        //     commandEncoder.copyBufferToBuffer(this.visibleFacesBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     this.device.queue.submit([commandEncoder.finish()]);
+        //     await this.device.queue.onSubmittedWorkDone();
 
-            await dbgBuffer.mapAsync(GPUMapMode.READ);
+        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-            var debugVals = new Float32Array(dbgBuffer.getMappedRange());
-            // console.log(debugVals);
-            for (var i = 0; i < this.numTetra; i++) {
-                if (tileCounts[i] > 0 &&
-                Math.sign(debugVals[i * 4]) == Math.sign(debugVals[i * 4 + 1]) && 
-                Math.sign(debugVals[i * 4 + 1]) == Math.sign(debugVals[i * 4 + 2]) &&
-                Math.sign(debugVals[i * 4 + 2]) == Math.sign(debugVals[i * 4 + 3])) {
-                    console.log(`ERROR: All faces pointed same direction for tetra ${i} with vals ${debugVals[i * 4]} 
-                        ${debugVals[i * 4 + 1]} ${debugVals[i * 4 + 2]} ${debugVals[i * 4 + 3]}`);
-                        break;
-                }
-            }
-        }
+        //     var debugVals = new Float32Array(dbgBuffer.getMappedRange());
+        //     // console.log(debugVals);
+        //     for (var i = 0; i < this.numTetra; i++) {
+        //         if (tileCounts[i] > 0 &&
+        //         Math.sign(debugVals[i * 4]) == Math.sign(debugVals[i * 4 + 1]) && 
+        //         Math.sign(debugVals[i * 4 + 1]) == Math.sign(debugVals[i * 4 + 2]) &&
+        //         Math.sign(debugVals[i * 4 + 2]) == Math.sign(debugVals[i * 4 + 3])) {
+        //             console.log(`ERROR: All faces pointed same direction for tetra ${i} with vals ${debugVals[i * 4]} 
+        //                 ${debugVals[i * 4 + 1]} ${debugVals[i * 4 + 2]} ${debugVals[i * 4 + 3]}`);
+        //                 break;
+        //         }
+        //     }
+        // }
         {
             var dbgBuffer = this.device.createBuffer({
                 size: this.tetraUVBuffer.size,
@@ -510,10 +503,10 @@ export class Renderer {
             0,
             this.tileOffsetBuffer,
             0,
-            this.numTetra * 4);
+            this.numTetra * 4 * 4);
         this.device.queue.submit([commandEncoder.finish()]);
         var start = performance.now();
-        this.numIntersections = await this.scanTileCounts.scan(this.numTetra);
+        this.numIntersections = await this.scanTileCounts.scan(this.numTetra * 4);
         var end = performance.now();
         console.log(`Scan tile counts took ${end - start} ms`);
         console.log(`Found ${this.numIntersections} intersections`);
@@ -535,16 +528,16 @@ export class Renderer {
         }
         const sortBuffers = this.sorter.createSortBuffers(this.numIntersections);
         this.tileIDBuffer = sortBuffers.keys;
-        this.tetraIDBuffer = sortBuffers.values;
+        this.faceIDBuffer = sortBuffers.values;
 
         this.writeTileIDsBindGroup = this.device.createBindGroup({
             layout: this.writeTileIDsPipeline.getBindGroupLayout(0),
             entries: [
                 {binding: 0, resource: {buffer: this.tileOffsetBuffer}},
-                {binding: 1, resource: {buffer: this.tetraRectBuffer}},
-                {binding: 2, resource: {buffer: this.tetraDepthBuffer}},
+                {binding: 1, resource: {buffer: this.faceRectBuffer}},
+                {binding: 2, resource: {buffer: this.faceDepthBuffer}},
                 {binding: 3, resource: {buffer: this.tileIDBuffer}},
-                {binding: 4, resource: {buffer: this.tetraIDBuffer}},
+                {binding: 4, resource: {buffer: this.faceIDBuffer}},
                 {binding: 5, resource: {buffer: this.numTetraBuffer}},
                 {binding: 6, resource: {buffer: this.canvasSizeBuffer}},
                 {binding: 7, resource: {buffer: this.tileSizeBuffer}},
@@ -557,7 +550,7 @@ export class Renderer {
             const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.writeTileIDsPipeline);
             passEncoder.setBindGroup(0, this.writeTileIDsBindGroup);
-            passEncoder.dispatchWorkgroups(Math.ceil(this.numTetra / 256));
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numTetra * 4 / 256));
             passEncoder.end();
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
@@ -576,19 +569,19 @@ export class Renderer {
 
         // {
         //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.tetraIDBuffer.size,
+        //         size: this.faceIDBuffer.size,
         //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
         //     });
 
         //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.tetraIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     commandEncoder.copyBufferToBuffer(this.faceIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
         //     this.device.queue.submit([commandEncoder.finish()]);
         //     await this.device.queue.onSubmittedWorkDone();
 
         //     await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-        //     var tetraIDs = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(tetraIDs);
+        //     var faceIDs = new Uint32Array(dbgBuffer.getMappedRange());
+        //     console.log(faceIDs);
         // }
 
         // {
@@ -658,14 +651,13 @@ export class Renderer {
                 entries: [
                     {binding: 0, resource: this.renderTarget.createView()},
                     {binding: 1, resource: {buffer: this.rangesBuffer}},
-                    {binding: 2, resource: {buffer: this.tetraIDBuffer}},
+                    {binding: 2, resource: {buffer: this.faceIDBuffer}},
                     {binding: 3, resource: {buffer: this.tetraDataBuffer}},
                     {binding: 4, resource: {buffer: this.pointDataBuffer}},
                     {binding: 5, resource: {buffer: this.tetraUVBuffer}},
-                    {binding: 6, resource: {buffer: this.visibleFacesBuffer}},
-                    {binding: 7, resource: {buffer: this.canvasSizeBuffer}},
-                    {binding: 8, resource: {buffer: this.tileSizeBuffer}},
-                    {binding: 9, resource: {buffer: this.uniformBuffer}},
+                    {binding: 6, resource: {buffer: this.canvasSizeBuffer}},
+                    {binding: 7, resource: {buffer: this.tileSizeBuffer}},
+                    {binding: 8, resource: {buffer: this.uniformBuffer}},
                 ]
             });
             const commandEncoder = this.device.createCommandEncoder();
@@ -711,8 +703,8 @@ export class Renderer {
         // clear everything for next pass
         var commandEncoder = this.device.createCommandEncoder();
         commandEncoder.clearBuffer(this.tileCountBuffer);
-        commandEncoder.clearBuffer(this.tetraRectBuffer);
-        commandEncoder.clearBuffer(this.tetraDepthBuffer);
+        commandEncoder.clearBuffer(this.faceRectBuffer);
+        commandEncoder.clearBuffer(this.faceDepthBuffer);
         commandEncoder.clearBuffer(this.rangesBuffer);
         sortBuffers.destroy();
         commandEncoder.copyTextureToTexture(

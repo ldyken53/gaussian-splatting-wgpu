@@ -15,10 +15,9 @@ struct Uniforms {
 @group(0) @binding(3) var<storage, read> tetra_data: array<vec4<u32>>;
 @group(0) @binding(4) var<storage, read> point_data: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read> tetra_uvs: array<mat4x2<f32>>;
-@group(0) @binding(6) var<storage, read> visible_faces: array<vec4<f32>>;
-@group(0) @binding(7) var<uniform> canvas_size: vec2<u32>;
-@group(0) @binding(8) var<uniform> tile_size: u32;
-@group(0) @binding(9) var<uniform> uniforms: Uniforms;
+@group(0) @binding(6) var<uniform> canvas_size: vec2<u32>;
+@group(0) @binding(7) var<uniform> tile_size: u32;
+@group(0) @binding(8) var<uniform> uniforms: Uniforms;
 
 // the workgroup size needs to be the tile size
 @compute @workgroup_size(TILE_SIZE_MACRO, TILE_SIZE_MACRO)
@@ -26,9 +25,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
     if (global_id.x > canvas_size.x || global_id.y > canvas_size.y) {
         return;
     }
-    let one = vec4<u32>(0, 0, 0, 1);
-    let two = vec4<u32>(1, 3, 2, 3);
-    let three = vec4<u32>(2, 1, 3, 2);
+    let face_indices = array<vec4<u32>, 3>(
+        vec4<u32>(0, 0, 0, 1),
+        vec4<u32>(1, 3, 2, 3),
+        vec4<u32>(2, 1, 3, 2),
+    );
     let pixel = vec2<f32>(global_id.xy);
     let tile_id = w_id.x + w_id.y * n_wgs.x;
     var start_index : u32 = 0;
@@ -40,23 +41,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
     let float_canvas = vec2(f32(canvas_size.x), f32(canvas_size.y));
     var done = false;
     for (var i = start_index; i < end_index; i++) {
-        let tetra = tetra_data[indices[i]];
-        let uvs = tetra_uvs[indices[i]];
-        let faces = visible_faces[indices[i]];
-        for (var j = 0; j < 4; j++) {
-            if (faces[j] > 0) {
-                if (is_point_in_triangle(pixel, uvs[one[j]] * float_canvas, uvs[two[j]] * float_canvas, uvs[three[j]] * float_canvas)) {
-                    // let value = trilinear_interpolate(
-                    //     pixel, uvs[one[j]] * float_canvas, uvs[two[j]] * float_canvas, uvs[three[j]] * float_canvas,
-                    //     point_data[tetra[one[j]]].w, point_data[tetra[two[j]]].w, point_data[tetra[three[j]]].w
-                    // );
-                    let value = (point_data[tetra[one[j]]].w + point_data[tetra[two[j]]].w + point_data[tetra[three[j]]].w) / 3.0;
-                    // value = (value + 13.0) / 26.0;
-                    accumulated_color = vec3<f32>((value), 0.0, 1.0);
-                    done = true;
-                    break;
-                }
-            }
+        let tetra_id : u32 = u32(indices[i] / 4);
+        let tetra = tetra_data[tetra_id];
+        let uvs = tetra_uvs[tetra_id];
+        let face_id = indices[i] % 4;
+        if (is_point_in_triangle(
+            pixel, 
+            uvs[u32(face_indices[0][face_id])] * float_canvas, 
+            uvs[u32(face_indices[1][face_id])] * float_canvas, 
+            uvs[u32(face_indices[2][face_id])] * float_canvas
+        )) {
+            // let value = trilinear_interpolate(
+            //     pixel, uvs[one[j]] * float_canvas, uvs[two[j]] * float_canvas, uvs[three[j]] * float_canvas,
+            //     point_data[tetra[one[j]]].w, point_data[tetra[two[j]]].w, point_data[tetra[three[j]]].w
+            // );
+            let value = (
+                point_data[tetra[u32(face_indices[0][face_id])]].w + 
+                point_data[tetra[u32(face_indices[1][face_id])]].w + 
+                point_data[tetra[u32(face_indices[2][face_id])]].w
+            ) / 3.0;
+            // value = (value + 13.0) / 26.0;
+            accumulated_color = vec3<f32>((value + 13.0) / 26.0, 0.0, 1.0);
+            done = true;
+            break;
         }
         if (done) {
             break;
