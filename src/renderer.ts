@@ -90,6 +90,7 @@ export class Renderer {
     processTetraBindGroup: GPUBindGroup;
     tetraUVBuffer: GPUBuffer;
     visibleFacesBuffer: GPUBuffer;
+    numIntersectionsBuffer: GPUBuffer;
 
     // destroy the renderer and return a promise that resolves when it's done (after the next frame)
     public async destroy(): Promise<void> {
@@ -187,7 +188,7 @@ export class Renderer {
 
         // buffer for the range of tiles for each face
         this.rangesBuffer = this.device.createBuffer({
-            size: Math.ceil(this.canvas.width / this.tileSize)  * Math.ceil(this.canvas.height / this.tileSize) * 4, // u32
+            size: Math.ceil(this.canvas.width / this.tileSize)  * Math.ceil(this.canvas.height / this.tileSize) * 2 * 4, // vec2<u32>
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.rangesBuffer"
         });
@@ -510,6 +511,18 @@ export class Renderer {
         var end = performance.now();
         console.log(`Scan tile counts took ${end - start} ms`);
         console.log(`Found ${this.numIntersections} intersections`);
+        this.numIntersectionsBuffer = this.device.createBuffer({
+            size: 1 * 4,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+            label: "renderer.numIntersectionsBuffer"
+        });
+        this.device.queue.writeBuffer(
+            this.numIntersectionsBuffer,
+            0,
+            new Uint32Array([this.numIntersections]),
+            0,
+            1
+        );
         {
             var dbgBuffer = this.device.createBuffer({
                 size: this.tileOffsetBuffer.size,
@@ -609,15 +622,14 @@ export class Renderer {
                 entries: [
                     {binding: 0, resource: {buffer: this.tileIDBuffer}},
                     {binding: 1, resource: {buffer: this.rangesBuffer}},
-                    {binding: 2, resource: {buffer: this.numTilesBuffer}},
+                    {binding: 2, resource: {buffer: this.numIntersectionsBuffer}},
                 ]
             });
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
             passEncoder.setPipeline(this.computeRangesPipeline);
             passEncoder.setBindGroup(0, this.computeRangesBindGroup);
-            // workgroup is 256 and each thread does 64 elements
-            passEncoder.dispatchWorkgroups(Math.ceil(this.numIntersections / (64 * 256)));
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numIntersections / 256));
             passEncoder.end();
 
             this.device.queue.submit([commandEncoder.finish()]);

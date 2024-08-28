@@ -10,7 +10,7 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var render_target : texture_storage_2d<rgba8unorm, write>;
-@group(0) @binding(1) var<storage, read> ranges: array<u32>;
+@group(0) @binding(1) var<storage, read> ranges: array<vec2<u32>>;
 @group(0) @binding(2) var<storage, read> indices: array<u32>;
 @group(0) @binding(3) var<storage, read> tetra_data: array<vec4<u32>>;
 @group(0) @binding(4) var<storage, read> point_data: array<vec4<f32>>;
@@ -32,15 +32,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
     );
     let pixel = vec2<f32>(global_id.xy);
     let tile_id = w_id.x + w_id.y * n_wgs.x;
-    var start_index : u32 = 0;
-    if (tile_id > 0) {
-        start_index = ranges[tile_id - 1];
-    }
-    var end_index : u32 = ranges[tile_id];
     var accumulated_color: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);  
     let float_canvas = vec2(f32(canvas_size.x), f32(canvas_size.y));
     var done = false;
-    for (var i = start_index; i < end_index; i++) {
+    for (var i = ranges[tile_id].x; i < ranges[tile_id].y; i++) {
         let tetra_id : u32 = u32(indices[i] / 4);
         let tetra = tetra_data[tetra_id];
         let uvs = tetra_uvs[tetra_id];
