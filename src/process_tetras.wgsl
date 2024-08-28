@@ -82,13 +82,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             var mins = float_canvas;
             var maxes = vec2<f32>(0.0, 0.0);
             var closest : f32 = 1000;
+            var average : f32 = 0;
             for (var j = 0; j < 3; j++) {
               mins.x = min(mins.x, points_uv[indices[j][i]].x * float_canvas.x);
               maxes.x = max(maxes.x, points_uv[indices[j][i]].x * float_canvas.x);
               mins.y = min(mins.y, points_uv[indices[j][i]].y * float_canvas.y);
               maxes.y = max(maxes.y, points_uv[indices[j][i]].y * float_canvas.y);
               closest = min(closest, view_pos[indices[j][i]].z);
+              average += view_pos[indices[j][i]].z;
             }
+            average = average / 3.0;
 
             let rect = getRect(
                 mins,
@@ -97,7 +100,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             );
             tile_counts[global_id.x * 4 + i] = (rect.w - rect.y) * (rect.z - rect.x);
             face_rects[global_id.x * 4 + i] = rect;
-            face_depths[global_id.x * 4 + i] = closest;
+            face_depths[global_id.x * 4 + i] = average;
           } else {
             tile_counts[global_id.x * 4 + i] = 0;
           }

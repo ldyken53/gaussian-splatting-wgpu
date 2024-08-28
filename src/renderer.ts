@@ -451,7 +451,7 @@ export class Renderer {
             await dbgBuffer.mapAsync(GPUMapMode.READ);
 
             var tileCounts = new Uint32Array(dbgBuffer.getMappedRange());
-            console.log(tileCounts);
+            // console.log(tileCounts);
         }
         // {
         //     var dbgBuffer = this.device.createBuffer({
@@ -493,7 +493,7 @@ export class Renderer {
             await dbgBuffer.mapAsync(GPUMapMode.READ);
 
             var debugVals = new Float32Array(dbgBuffer.getMappedRange());
-            console.log(debugVals);
+            // console.log(debugVals);
         }
 
         // find the offsets for each tetra to write its tile intersections
@@ -524,7 +524,7 @@ export class Renderer {
             await dbgBuffer.mapAsync(GPUMapMode.READ);
 
             var tileCountVals = new Uint32Array(dbgBuffer.getMappedRange());
-            console.log(tileCountVals);
+            // console.log(tileCountVals);
         }
         const sortBuffers = this.sorter.createSortBuffers(this.numIntersections);
         this.tileIDBuffer = sortBuffers.keys;

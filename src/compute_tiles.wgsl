@@ -47,21 +47,26 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
         let face_id = indices[i] % 4;
         if (is_point_in_triangle(
             pixel, 
-            uvs[u32(face_indices[0][face_id])] * float_canvas, 
-            uvs[u32(face_indices[1][face_id])] * float_canvas, 
-            uvs[u32(face_indices[2][face_id])] * float_canvas
+            uvs[face_indices[0][face_id]] * float_canvas, 
+            uvs[face_indices[1][face_id]] * float_canvas, 
+            uvs[face_indices[2][face_id]] * float_canvas
         )) {
             // let value = trilinear_interpolate(
-            //     pixel, uvs[one[j]] * float_canvas, uvs[two[j]] * float_canvas, uvs[three[j]] * float_canvas,
-            //     point_data[tetra[one[j]]].w, point_data[tetra[two[j]]].w, point_data[tetra[three[j]]].w
+            //     pixel, 
+            //     uvs[face_indices[0][face_id]] * float_canvas, 
+            //     uvs[face_indices[1][face_id]] * float_canvas, 
+            //     uvs[face_indices[2][face_id]] * float_canvas,
+            //     point_data[tetra[face_indices[0][face_id]]].w, 
+            //     point_data[tetra[face_indices[1][face_id]]].w, 
+            //     point_data[tetra[face_indices[2][face_id]]].w
             // );
             let value = (
-                point_data[tetra[u32(face_indices[0][face_id])]].w + 
-                point_data[tetra[u32(face_indices[1][face_id])]].w + 
-                point_data[tetra[u32(face_indices[2][face_id])]].w
+                point_data[tetra[face_indices[0][face_id]]].w + 
+                point_data[tetra[face_indices[1][face_id]]].w + 
+                point_data[tetra[face_indices[2][face_id]]].w
             ) / 3.0;
             // value = (value + 13.0) / 26.0;
-            accumulated_color = vec3<f32>((value + 13.0) / 26.0, 0.0, 1.0);
+            accumulated_color = vec3<f32>(value / 5, 0.0, 1.0);
             done = true;
             break;
         }
