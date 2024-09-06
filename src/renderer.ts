@@ -159,7 +159,7 @@ export class Renderer {
         });
 
         this.faceDepthBuffer = this.device.createBuffer({
-            size: this.numTetra * 4 * 4,
+            size: this.numTetra * 4 * 4 * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.faceDepthBuffer",
         });
@@ -551,9 +551,10 @@ export class Renderer {
                 {binding: 2, resource: {buffer: this.faceDepthBuffer}},
                 {binding: 3, resource: {buffer: this.tileIDBuffer}},
                 {binding: 4, resource: {buffer: this.faceIDBuffer}},
-                {binding: 5, resource: {buffer: this.numTetraBuffer}},
-                {binding: 6, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 7, resource: {buffer: this.tileSizeBuffer}},
+                {binding: 5, resource: {buffer: this.tetraUVBuffer}},
+                {binding: 6, resource: {buffer: this.numTetraBuffer}},
+                {binding: 7, resource: {buffer: this.canvasSizeBuffer}},
+                {binding: 8, resource: {buffer: this.tileSizeBuffer}},
             ]
         });
         { 
@@ -667,9 +668,10 @@ export class Renderer {
                     {binding: 3, resource: {buffer: this.tetraDataBuffer}},
                     {binding: 4, resource: {buffer: this.pointDataBuffer}},
                     {binding: 5, resource: {buffer: this.tetraUVBuffer}},
-                    {binding: 6, resource: {buffer: this.canvasSizeBuffer}},
-                    {binding: 7, resource: {buffer: this.tileSizeBuffer}},
-                    {binding: 8, resource: {buffer: this.uniformBuffer}},
+                    {binding: 6, resource: {buffer: this.faceDepthBuffer}},
+                    {binding: 7, resource: {buffer: this.canvasSizeBuffer}},
+                    {binding: 8, resource: {buffer: this.tileSizeBuffer}},
+                    {binding: 9, resource: {buffer: this.uniformBuffer}},
                 ]
             });
             const commandEncoder = this.device.createCommandEncoder();

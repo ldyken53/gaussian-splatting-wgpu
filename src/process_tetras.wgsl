@@ -13,7 +13,7 @@ struct Uniforms {
 @group(0) @binding(1) var<storage, read_write> tetra_data: array<vec4<u32>>;
 @group(0) @binding(2) var<storage, read_write> tile_counts: array<u32>;
 @group(0) @binding(3) var<storage, read_write> face_rects: array<vec4<u32>>;
-@group(0) @binding(4) var<storage, read_write> face_depths: array<f32>;
+@group(0) @binding(4) var<storage, read_write> face_depths: array<vec3<f32>>;
 @group(0) @binding(5) var<storage, read_write> tetra_uvs: array<mat4x2<f32>>;
 @group(0) @binding(6) var<uniform> uniforms: Uniforms;
 @group(0) @binding(7) var<uniform> num_tetra: u32;
@@ -90,6 +90,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
               maxes.y = max(maxes.y, points_uv[indices[j][i]].y * float_canvas.y);
               closest = min(closest, view_pos[indices[j][i]].z);
               average += view_pos[indices[j][i]].z;
+              face_depths[global_id.x * 4 + i][j] = view_pos[indices[j][i]].z;
             }
             average = average / 3.0;
 
@@ -100,7 +101,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             );
             tile_counts[global_id.x * 4 + i] = (rect.w - rect.y) * (rect.z - rect.x);
             face_rects[global_id.x * 4 + i] = rect;
-            face_depths[global_id.x * 4 + i] = average;
+            // face_depths[global_id.x * 4 + i] = average;
           } else {
             tile_counts[global_id.x * 4 + i] = 0;
           }

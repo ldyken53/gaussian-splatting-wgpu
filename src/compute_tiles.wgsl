@@ -15,9 +15,10 @@ struct Uniforms {
 @group(0) @binding(3) var<storage, read> tetra_data: array<vec4<u32>>;
 @group(0) @binding(4) var<storage, read> point_data: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read> tetra_uvs: array<mat4x2<f32>>;
-@group(0) @binding(6) var<uniform> canvas_size: vec2<u32>;
-@group(0) @binding(7) var<uniform> tile_size: u32;
-@group(0) @binding(8) var<uniform> uniforms: Uniforms;
+@group(0) @binding(6) var<storage, read> face_depths: array<vec3<f32>>;
+@group(0) @binding(7) var<uniform> canvas_size: vec2<u32>;
+@group(0) @binding(8) var<uniform> tile_size: u32;
+@group(0) @binding(9) var<uniform> uniforms: Uniforms;
 
 // the workgroup size needs to be the tile size
 @compute @workgroup_size(TILE_SIZE_MACRO, TILE_SIZE_MACRO)
@@ -60,6 +61,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
                 point_data[tetra[face_indices[1][face_id]]].w + 
                 point_data[tetra[face_indices[2][face_id]]].w
             ) / 3.0;
+            // let value2 = (
+            //     face_depths[indices[i]].x + face_depths[indices[i]].y + face_depths[indices[i]].z
+            // ) / 6.0;
+            let value2 = trilinear_interpolate(
+                pixel,
+                uvs[face_indices[0][face_id]] * float_canvas, 
+                uvs[face_indices[1][face_id]] * float_canvas, 
+                uvs[face_indices[2][face_id]] * float_canvas,
+                face_depths[indices[i]].x,
+                face_depths[indices[i]].y,
+                face_depths[indices[i]].z
+            ) / 1;
             // value = (value + 13.0) / 26.0;
             accumulated_color = vec3<f32>(value, 0.0, 1.0);
             done = true;
@@ -95,17 +108,25 @@ fn is_point_in_triangle(p: vec2<f32>, v0: vec2<f32>, v1: vec2<f32>, v2: vec2<f32
 
 fn trilinear_interpolate(
     p: vec2<f32>,
-    v1: vec2<f32>,
-    v2: vec2<f32>,
-    v3: vec2<f32>,
+    a: vec2<f32>,
+    b: vec2<f32>,
+    c: vec2<f32>,
     f1: f32,
     f2: f32,
     f3: f32
 ) -> f32 {
-    let v12 = v2 - v1;
-    let v13 = v3 - v1;
-    let u = dot(v12, p - v1) / dot(v12, v12);
-    let v = dot(v13, p - v1) / dot(v13, v13);
-    let w = 1.0 - u - v;
-    return f1 * w + f2 * u + f3 * v;
+    let v0 = b - a;
+    let v1 = c - a;
+    let v2 = p - a;
+    let d00 = dot(v0, v0);
+    let d01 = dot(v0, v1);
+    let d11 = dot(v1, v1);
+    let d20 = dot(v2, v0);
+    let d21 = dot(v2, v1);
+    let denom = d00 * d11 - d01 * d01;
+    let v = (d11 * d20 - d01 * d21) / denom;
+    let w = (d00 * d21 - d01 * d20) / denom;
+    let u = 1.0 - v - w;
+    let z = (1.0 / f1) * u + (1.0 / f2) * v + (1.0 / f3) * w;
+    return (1.0 / z);
 }
