@@ -37,7 +37,6 @@ import { guessWorkgroupSize } from "./radix_sort/utils";
         const file = event.target.files[0];
     
         async function onFileLoad(text: string) {
-            console.log(text);
             if (currentRenderer) {
                 await currentRenderer.destroy();
             }

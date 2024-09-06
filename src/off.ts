@@ -47,9 +47,37 @@ export class Volume {
       
         // Parse the point data
         const pointData: number[] = [];
+        var mins = [10.0, 10.0, 10.0, 10.0];
+        var maxes = [-10.0, -10.0, -10.0, -10.0];
         for (let i = 1; i <= this.numPoints; i++) {
           const [x, y, z, value] = lines[i].trim().split(' ').map(Number);
           pointData.push(x, y, z, value);
+          if (x > maxes[0]) { maxes[0] = x }
+          if (x < mins[0]) { mins[0] = x }
+          if (y > maxes[1]) { maxes[1] = y }
+          if (y < mins[1]) { mins[1] = y }
+          if (z > maxes[2]) { maxes[2] = z }
+          if (z < mins[2]) { mins[2] = z }
+          if (value > maxes[3]) { maxes[3] = value }
+          if (value < mins[3]) { mins[3] = value }
+        }
+        console.log(
+          `x [${mins[0]}, ${maxes[0]}]
+          y: [${mins[1]}, ${maxes[1]}]
+          z: [${mins[2]}, ${maxes[2]}]
+          value: [${mins[3]}, ${maxes[3]}]`
+        );
+        let min = 10;
+        let max = -10;
+        for (let i = 0; i < 3; i++) {
+          if (mins[i] < min) { min = mins[i] }
+          if (maxes[i] > max) { max = maxes[i] }
+        }
+        for (let i = 0; i < pointData.length; i+= 4) {
+          pointData[i] = (pointData[i] - min) / (max - min)
+          pointData[i + 1] = (pointData[i + 1] - min) / (max - min)
+          pointData[i + 2] = (pointData[i + 2] - min) / (max - min)
+          pointData[i + 3] = (pointData[i + 3] - mins[3]) / (maxes[3] - mins[3])
         }
         this.points = new Float32Array(pointData);
       

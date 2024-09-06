@@ -61,7 +61,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
                 point_data[tetra[face_indices[2][face_id]]].w
             ) / 3.0;
             // value = (value + 13.0) / 26.0;
-            accumulated_color = vec3<f32>(value / 5, 0.0, 1.0);
+            accumulated_color = vec3<f32>(value, 0.0, 1.0);
             done = true;
             break;
         }

@@ -20,8 +20,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var x = rect.x; x < rect.z; x++) {
             let tile_id : u32 = y * u32(num_tiles.x) + x;
             // TODO: Fix when this overflows for large number of tiles
-            // TODO: assumes depths are 0-99.9
-            tile_ids[offs] = tile_id * 1000 + u32(min(10 * depth, 999));
+            // TODO: assumes depths are 0-5
+            tile_ids[offs] = tile_id * 1000 + u32(min(200 * depth, 999));
             face_ids[offs] = global_id.x;
             offs++;
         }
