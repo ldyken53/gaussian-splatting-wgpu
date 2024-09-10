@@ -161,7 +161,7 @@ export class Renderer {
 
         // buffer for gaussian info needed for computing tiles
         this.gaussianDataBuffer = this.device.createBuffer({
-            size: this.numGaussians * (16) * 4, // vec2, vec3, vec3, f32, vec4 with alignment rules
+            size: this.numGaussians * (16) * 4, // vec2, vec3, f32, vec3, f32, vec4 with alignment rules
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.gaussianDataBuffer"
         });
