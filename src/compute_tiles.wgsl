@@ -19,7 +19,7 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var render_target : texture_storage_2d<rgba8unorm, write>;
-@group(0) @binding(1) var<storage, read_write> ranges: array<u32>;
+@group(0) @binding(1) var<storage, read> ranges: array<vec2<u32>>;
 @group(0) @binding(2) var<storage, read_write> indices: array<u32>;
 @group(0) @binding(3) var<storage, read> gaussian_data: array<GaussianData>;
 @group(0) @binding(4) var<uniform> canvas_size: vec2<u32>;
@@ -39,14 +39,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
     // }
     let pixel = vec2<f32>(global_id.xy);
     let tile_id = w_id.x + w_id.y * n_wgs.x;
-    var start_index : u32 = 0;
-    if (tile_id > 0) {
-        start_index = ranges[tile_id - 1];
-    }
-    var end_index : u32 = ranges[tile_id];
     var accumulated_color: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);  
     var t_i: f32 = 1.0; // The initial value of accumulated alpha (initial value of accumulated multiplication)
-    for (var i = start_index; i < end_index; i++) {
+    for (var i = ranges[tile_id].x; i < ranges[tile_id].y; i++) {
         let gaussian = gaussian_data[indices[i]];
         let conic = gaussian.conic;
         let g_xy = vec2<f32>(gaussian.uv.x * f32(canvas_size.x), gaussian.uv.y * f32(canvas_size.y));
