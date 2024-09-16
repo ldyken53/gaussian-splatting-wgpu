@@ -27,8 +27,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var x = gaussian.rect.x; x < gaussian.rect.z; x++) {
             let tile_id : u32 = y * u32(num_tiles.x) + x;
             // TODO: Fix when this overflows for large number of tiles
-            // TODO: assumes depths are 0-9.99 * 2!
-            tile_ids[offs] = tile_id * 1000 + u32(min(50 * gaussian.depth, 999));
+            // TODO: assumes depths are 0-9.99 * 10!
+            tile_ids[offs] = tile_id * 1000 + u32(min(10 * gaussian.depth, 999));
             gaussian_ids[offs] = global_id.x;
             offs++;
         }

@@ -101,26 +101,19 @@ export class PackedGaussians {
         ];
     }
 
-    private readRawVertex(offset: number, vertexData: DataView, propertyTypes: Record<string, string>): [number, Record<string, number>] {
-        /* reads a single vertex from the vertexData DataView and returns a tuple of:
-            * - offset: the offset of the next vertex in the vertexData DataView
+    private readRawVertex(line: string, propertyTypes: Record<string, string>): Record<string, number> {
+        /* reads a single vertex from a line of text and returns:
             * - rawVertex: a map from property names to their values
         */
         let rawVertex: Record<string, number> = {};
-
+        const data = line.split(' ').map(Number);
+        let i = 0;
         for (const property in propertyTypes) {
-            const propertyType = propertyTypes[property];
-            if (propertyType === 'float') {
-                rawVertex[property] = vertexData.getFloat32(offset, true);
-                console.log(property, rawVertex[property]);
-                offset += Float32Array.BYTES_PER_ELEMENT;
-            } else if (propertyType === 'uchar') {
-                rawVertex[property] = vertexData.getUint8(offset) / 255.0;
-                offset += Uint8Array.BYTES_PER_ELEMENT;
-            }
+            rawVertex[property] = data[i];
+            i++;
         }
 
-        return [offset, rawVertex];
+        return rawVertex;
     }
 
     private arrangeVertex(rawVertex: Record<string, number>): Record<string, any> {
@@ -128,7 +121,6 @@ export class PackedGaussians {
         const arrangedVertex: Record<string, any> = {
             position: [rawVertex.x, rawVertex.y, rawVertex.z],
             value: rawVertex.value,
-            opacityLogit: rawVertex.opacity,
             logScale: [rawVertex.scale_0, rawVertex.scale_1, rawVertex.scale_2],
             rotQuat: [rawVertex.rot_0, rawVertex.rot_1, rawVertex.rot_2, rawVertex.rot_3],
         };
@@ -144,7 +136,6 @@ export class PackedGaussians {
         this.gaussianLayout = new Struct([
             ['position', new vec3(f32)],
             ['value', f32],
-            ['opacityLogit', f32],
             ['logScale', new vec3(f32)],
             ['rotQuat', new vec4(f32)],
         ]);
@@ -161,14 +152,17 @@ export class PackedGaussians {
         this.positionsBuffer = new ArrayBuffer(this.positionsArrayLayout.size);
         const positionsWriteView = new DataView(this.positionsBuffer);
 
-        var readOffset = 0;
+        const decoder = new TextDecoder();
+        const vertexText = decoder.decode(vertexData);
+        const vertexLines = vertexText.split('\n');
+
         var gaussianWriteOffset = 0;
         var positionWriteOffset = 0;
         var minVal = 10;
         var maxVal = 0;
         for (let i = 0; i < vertexCount; i++) {
-            const [newReadOffset, rawVertex] = this.readRawVertex(readOffset, vertexData, propertyTypes);
-            readOffset = newReadOffset;
+            const line = vertexLines[i].trim();
+            const rawVertex = this.readRawVertex(line, propertyTypes);
             gaussianWriteOffset = this.gaussianLayout.pack(
                 gaussianWriteOffset,
                 this.arrangeVertex(rawVertex),
@@ -180,7 +174,6 @@ export class PackedGaussians {
                 [rawVertex.x, rawVertex.y, rawVertex.z],
                 positionsWriteView,
             );
-            console.log(rawVertex.value);
             if (rawVertex.value > maxVal) {
                 maxVal = rawVertex.value;
             }

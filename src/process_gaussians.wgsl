@@ -1,9 +1,8 @@
 struct PointInput {
     @location(0) position: vec3<f32>,
     @location(1) value: f32,
-    @location(2) opacity_logit: f32,
-    @location(3) log_scale: vec3<f32>,
-    @location(4) rot: vec4<f32>,
+    @location(2) log_scale: vec3<f32>,
+    @location(3) rot: vec4<f32>,
 };
 struct GaussianData {
     uv: vec2<f32>,
@@ -91,8 +90,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // let tile_id = u32(point_uv.x * num_tiles.x) + u32(floor(point_uv.y * num_tiles.y) * num_tiles.x);
         // tiles[global_id.x] = tile_id * 1000 + u32(depth);
 
-        let color = vec3<f32>(1.0, 0.0, 1.0);
-        let opacity = sigmoid(gaussian.opacity_logit);
+        let color = vec3<f32>((gaussian.value - 0.1926) / (4.9775 - 0.1926), 0.0, 1.0);
+        let opacity = 1.0;
         // save data so it doesn't have to be recomputed when computing tiles
         gaussian_data[global_id.x] = GaussianData(
             point_uv,
@@ -126,7 +125,7 @@ fn in_frustum(world_pos: vec4<f32>) -> bool {
 
 fn compute_cov3d(log_scale: vec3<f32>, rot: vec4<f32>) -> array<f32, 6> {
 
-  let modifier = uniforms.scale_modifier;
+  let modifier = 1.0;
 
   let S = mat3x3<f32>(
     exp(log_scale.x) * modifier, 0., 0.,
