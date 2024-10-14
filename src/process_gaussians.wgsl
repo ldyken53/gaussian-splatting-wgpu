@@ -2,7 +2,8 @@ struct PointInput {
     @location(0) position: vec3<f32>,
     @location(1) value: f32,
     @location(2) log_scale: vec3<f32>,
-    @location(3) rot: vec4<f32>,
+    @location(3) opacity: f32,
+    @location(4) rot: vec4<f32>,
 };
 struct GaussianData {
     uv: vec2<f32>,
@@ -89,15 +90,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // writing tile_id just for the gaussian mean position
         // let tile_id = u32(point_uv.x * num_tiles.x) + u32(floor(point_uv.y * num_tiles.y) * num_tiles.x);
         // tiles[global_id.x] = tile_id * 1000 + u32(depth);
-
-        let color = vec3<f32>((gaussian.value - 0.1926) / (4.9775 - 0.1926), 0.0, 1.0);
-        let opacity = 1.0;
+        
+        var result: vec3<f32>;
+        let clamped_value = clamp(gaussian.value * -1.0 + 1.0, 0.0, 1.0);
+        if (clamped_value <= 0.2) {
+            result.r = 1.0;
+            result.g = clamped_value * 5.0;
+            result.b = 0.0;
+        } else if (clamped_value <= 0.4) {
+            result.r = (0.4 - clamped_value) * 5.0;
+            result.g = 1.0;
+            result.b = 0.0;
+        } else if (clamped_value <= 0.6) {
+            result.r = 0.0;
+            result.g = 1.0;
+            result.b = (clamped_value - 0.4) * 5.0;
+        } else if (clamped_value <= 0.8) {
+            result.r = 0.0;
+            result.g = (0.8 - clamped_value) * 5.0;
+            result.b = 1.0;
+        } else {
+            result.r = (clamped_value - 0.8) * 5.0;
+            result.g = 0.0;
+            result.b = 1.0;
+        }
+        let color = vec3<f32>(1.0, gaussian.value, 0.0);
+        let opacity = sigmoid(gaussian.opacity) * 10;
         // save data so it doesn't have to be recomputed when computing tiles
         gaussian_data[global_id.x] = GaussianData(
             point_uv,
             conic,
             view_pos.z,
-            color,
+            result,
             opacity,
             rect
         );

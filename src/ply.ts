@@ -122,6 +122,7 @@ export class PackedGaussians {
             position: [rawVertex.x, rawVertex.y, rawVertex.z],
             value: rawVertex.value,
             logScale: [rawVertex.scale_0, rawVertex.scale_1, rawVertex.scale_2],
+            opacity: rawVertex.opacity,
             rotQuat: [rawVertex.rot_0, rawVertex.rot_1, rawVertex.rot_2, rawVertex.rot_3],
         };
         return arrangedVertex;
@@ -137,6 +138,7 @@ export class PackedGaussians {
             ['position', new vec3(f32)],
             ['value', f32],
             ['logScale', new vec3(f32)],
+            ['opacity', f32],
             ['rotQuat', new vec4(f32)],
         ]);
         // define the layout of the entire point cloud
