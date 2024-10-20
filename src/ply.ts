@@ -162,6 +162,8 @@ export class PackedGaussians {
         var positionWriteOffset = 0;
         var minVal = 10;
         var maxVal = 0;
+        var mins = [10.0, 10.0, 10.0];
+        var maxes = [-10.0, -10.0, -10.0];
         for (let i = 0; i < vertexCount; i++) {
             const line = vertexLines[i].trim();
             const rawVertex = this.readRawVertex(line, propertyTypes);
@@ -182,7 +184,24 @@ export class PackedGaussians {
             if (rawVertex.value < minVal) {
                 minVal = rawVertex.value;
             }
+            if (rawVertex.x > maxes[0]) { maxes[0] = rawVertex.x }
+            if (rawVertex.x < mins[0]) { mins[0] = rawVertex.x }
+            if (rawVertex.y > maxes[1]) { maxes[1] = rawVertex.y }
+            if (rawVertex.y < mins[1]) { mins[1] = rawVertex.y }
+            if (rawVertex.z > maxes[2]) { maxes[2] = rawVertex.z }
+            if (rawVertex.z < mins[2]) { mins[2] = rawVertex.z }
         }
-        console.log(`Range: [${minVal}, ${maxVal}]`);
+        console.log(
+            `Range:
+            x [${mins[0]}, ${maxes[0]}]
+            y: [${mins[1]}, ${maxes[1]}]
+            z: [${mins[2]}, ${maxes[2]}]
+            value: [${minVal}, ${maxVal}]`
+        );
+        var min = 10, max = -10;
+        for (let i = 0; i < 3; i++) {
+            if (mins[i] < min) { min = mins[i] }
+            if (maxes[i] > max) { max = maxes[i] }
+        }
     }
 }
