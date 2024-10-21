@@ -1,27 +1,16 @@
 import { Mat4 } from 'wgpu-matrix';
+import { saveAs } from 'file-saver';
 
 import { PackedGaussians } from './ply';
 import { Struct, f32, mat4x4, vec3 } from './packing';
 import { ExclusiveScanPipeline, ExclusiveScanner } from './exclusive_scan';
 import { InteractiveCamera } from './camera';
 
-import process_gaussians from "./process_gaussians.wgsl";
-import compute_tiles from "./compute_tiles.wgsl";
+import compute_aabbs from "./compute_aabbs.wgsl";
+import compute_cells from "./compute_cells.wgsl";
 import compute_ranges from "./compute_ranges.wgsl";
-import render from "./render.wgsl";
-import write_tile_ids from "./write_tile_ids.wgsl";
+import write_cell_ids from "./write_cell_ids.wgsl";
 import { GPUSorter } from './radix_sort/sort';
-
-const uniformLayout = new Struct([
-    ['viewMatrix', new mat4x4(f32)],
-    ['projMatrix', new mat4x4(f32)],
-    ['cameraPosition', new vec3(f32)],
-    ['tanHalfFovX', f32],
-    ['tanHalfFovY', f32],
-    ['focalX', f32],
-    ['focalY', f32],
-    ['scaleModifier', f32],
-]);
 
 function mat4toArrayOfArrays(m: Mat4): number[][] {
     return [
@@ -37,7 +26,6 @@ export class Renderer {
     interactiveCamera: InteractiveCamera;
 
     numGaussians: number;
-    tileSize: number;
     numIntersections: number;
     numFrames: number;
 
@@ -46,36 +34,31 @@ export class Renderer {
 
     sorter: GPUSorter;
     scanPipeline: ExclusiveScanPipeline;
-    scanTileCounts: ExclusiveScanner;
+    scanCellCounts: ExclusiveScanner;
 
     uniformBuffer: GPUBuffer; // camera uniforms
     pointDataBuffer: GPUBuffer;
     gaussianDataBuffer: GPUBuffer;
-    gaussianIDBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by tile and depth)
-    tileCountBuffer: GPUBuffer; // used to count the number of tile intersections for each Gaussian
-    tileOffsetBuffer: GPUBuffer; // filled with output of prefix sum on tileCountBuffer
-    tileIDBuffer: GPUBuffer; // tile IDs for each gaussian
-    rangesBuffer: GPUBuffer; // tile ranges for each pixel, pixel index written with stopping point in sorted gaussian buffer
+    gaussianIDBuffer: GPUBuffer; // buffer of gaussian indices (used for sort by cell)
+    cellCountBuffer: GPUBuffer; // used to count the number of cell intersections for each Gaussian
+    cellOffsetBuffer: GPUBuffer; // filled with output of prefix sum on cellCountBuffer
+    cellIDBuffer: GPUBuffer; // cell IDs for each gaussian
+    rangesBuffer: GPUBuffer; // intersection ranges for each cell
 
     numGaussianBuffer: GPUBuffer;
-    canvasSizeBuffer: GPUBuffer;
-    tileSizeBuffer: GPUBuffer;
-    numTilesBuffer: GPUBuffer;
 
     renderTarget: GPUTexture;
     renderTargetCopy: GPUTexture;
 
     renderPipelineBindGroup: GPUBindGroup;
     pointDataBindGroup: GPUBindGroup;
-    processGaussiansBindGroup: GPUBindGroup;
-    writeTileIDsBindGroup: GPUBindGroup;
-    computeTilesBindGroup: GPUBindGroup;
+    computeAABBsBindGroup: GPUBindGroup;
+    writeCellIDsBindGroup: GPUBindGroup;
     computeRangesBindGroup: GPUBindGroup;
 
     renderPipeline: GPURenderPipeline;
-    processGaussiansPipeline: GPUComputePipeline;
-    writeTileIDsPipeline: GPUComputePipeline;
-    computeTilesPipeline: GPUComputePipeline;
+    computeAABBsPipeline: GPUComputePipeline;
+    writeCellIDsPipeline: GPUComputePipeline;
     computeRangesPipeline: GPUComputePipeline;
 
     depthSortMatrix: number[][];
@@ -86,6 +69,14 @@ export class Renderer {
 
     destroyCallback: (() => void) | null = null;
     numIntersectionsBuffer: GPUBuffer;
+    volumeMins: number[];
+    volumeMaxes: number[];
+    cellSize: number;
+    volumeInfoBuffer: GPUBuffer;
+    numCells: number[];
+    computeCellsPipeline: GPUComputePipeline;
+    computeCellsBindGroup: GPUBindGroup;
+    cellDataBuffer: GPUBuffer;
 
     // destroy the renderer and return a promise that resolves when it's done (after the next frame)
     public async destroy(): Promise<void> {
@@ -101,7 +92,9 @@ export class Renderer {
         gaussians: PackedGaussians,
         tileSize: number
     ) {
-        this.tileSize = tileSize;
+        this.volumeMins = [-0.889295, -0.40698457, 2.508658]; 
+        this.volumeMaxes = [0.7828097, 0.428498, 3.512667];
+        this.cellSize = 0.02;
         this.canvas = canvas;
         this.interactiveCamera = interactiveCamera;
         this.device = device;
@@ -120,14 +113,6 @@ export class Renderer {
         this.numGaussians = gaussians.numGaussians;
         console.log(`Num Gaussians: ${this.numGaussians}`);
 
-        const presentationFormat = "rgba8unorm" as GPUTextureFormat;
-
-        this.contextGpu.configure({
-            device: this.device,
-            format: presentationFormat,
-            usage: GPUTextureUsage.RENDER_ATTACHMENT
-        });
-
         this.pointDataBuffer = this.device.createBuffer({
             size: gaussians.gaussianArrayLayout.size,
             usage: GPUBufferUsage.STORAGE,
@@ -137,41 +122,27 @@ export class Renderer {
         new Uint8Array(this.pointDataBuffer.getMappedRange()).set(new Uint8Array(gaussians.gaussiansBuffer));
         this.pointDataBuffer.unmap();
 
-        this.tileCountBuffer = this.device.createBuffer({
+        this.cellCountBuffer = this.device.createBuffer({
             size: this.numGaussians * 4, // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-            label: "renderer.tileCountBuffer"
+            label: "renderer.cellCountBuffer"
         });
 
-        this.tileOffsetBuffer = this.device.createBuffer({
+        this.cellOffsetBuffer = this.device.createBuffer({
             size: this.scanPipeline.getAlignedSize(this.numGaussians) * 4, // u32
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-            label: "renderer.tileOffsetBuffer"
+            label: "renderer.cellOffsetBuffer"
         });
 
-        this.scanTileCounts = this.scanPipeline.prepareGPUInput(
-            this.tileOffsetBuffer,
+        this.scanCellCounts = this.scanPipeline.prepareGPUInput(
+            this.cellOffsetBuffer,
             this.scanPipeline.getAlignedSize(this.numGaussians));
 
-        // buffer for the range of tiles for each pixel
-        this.rangesBuffer = this.device.createBuffer({
-            size: Math.ceil(this.canvas.width / this.tileSize)  * Math.ceil(this.canvas.height / this.tileSize) * 2 * 4, // vec2<u32>
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-            label: "renderer.rangesBuffer"
-        });
-
-        // buffer for gaussian info needed for computing tiles
+        // buffer for gaussian info needed for computing cells
         this.gaussianDataBuffer = this.device.createBuffer({
-            size: this.numGaussians * (16) * 4, // vec2, vec3, f32, vec3, f32, vec4 with alignment rules
+            size: this.numGaussians * (8) * 4, // vec3, vec3, f32 with alignment rules
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.gaussianDataBuffer"
-        });
-
-        // create a GPU buffer for the uniform data.
-        this.uniformBuffer = this.device.createBuffer({
-            size: uniformLayout.size,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-            label: "renderer.uniformBuffer",
         });
 
         // buffer for the num gaussians, set once
@@ -188,97 +159,78 @@ export class Renderer {
             1
         );
 
-        // buffer for the canvas size, set once
-        this.canvasSizeBuffer = this.device.createBuffer({
-            size: 2 * 4,
+        this.volumeInfoBuffer = this.device.createBuffer({
+            size: 8 * 4,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-            label: "renderer.canvasSizeBuffer"
+            label: "renderer.volumeInfoBuffer"
         });
         this.device.queue.writeBuffer(
-            this.canvasSizeBuffer,
+            this.volumeInfoBuffer,
             0,
-            new Uint32Array([this.canvas.width, this.canvas.height]),
+            new Float32Array([-0.889295, -0.40698457, 2.508658, this.cellSize, 0.7828097, 0.428498, 3.512667]),
             0,
-            2
+            7
         );
+        this.numCells = [
+            Math.ceil((0.7828097 - (-0.889295)) / this.cellSize),
+            Math.ceil((0.428498 - (-0.40698457)) / this.cellSize),
+            Math.ceil((3.512667 - (2.508658)) / this.cellSize)
+        ];
+        console.log(`Cells per dimension:
+            x: ${this.numCells[0]}
+            y: ${this.numCells[1]}
+            z: ${this.numCells[2]}
+        `);
 
-        // buffer for the tile size, set once, currently hardcoded
-        this.tileSizeBuffer = this.device.createBuffer({
-            size: 1 * 4,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-            label: "renderer.tileSizeBuffer"
+        // buffer for output data for each cell
+        this.cellDataBuffer = this.device.createBuffer({
+            size: this.numCells[0] * this.numCells[1] * this.numCells[2] * 4, // f32 for each cell
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+            label: "renderer.cellDataBuffer"
         });
-        this.device.queue.writeBuffer(
-            this.tileSizeBuffer,
-            0,
-            new Uint32Array([this.tileSize]),
-            0,
-            1
-        );
 
-        // buffer for the num tiles, set once, currently hardcoded
-        this.numTilesBuffer = this.device.createBuffer({
-            size: 1 * 4,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-            label: "renderer.numTilesBuffer"
+        // buffer for the range of gaussians for each cell
+        this.rangesBuffer = this.device.createBuffer({
+            size: this.numCells[0] * this.numCells[1] * this.numCells[2] * 2 * 4, // vec2<u32>
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+            label: "renderer.rangesBuffer"
         });
-        this.device.queue.writeBuffer(
-            this.numTilesBuffer,
-            0,
-            new Uint32Array([Math.ceil(this.canvas.width / this.tileSize) * Math.ceil(this.canvas.height / this.tileSize)]),
-            0,
-            1
-        );
 
-        this.processGaussiansPipeline = this.device.createComputePipeline({
+        this.computeAABBsPipeline = this.device.createComputePipeline({
             layout: "auto",
             compute: {
                 module: this.device.createShaderModule({
-                    code: process_gaussians,
+                    code: compute_aabbs,
                 }),
                 entryPoint: "main",
             },
         });
-        this.processGaussiansBindGroup = this.device.createBindGroup({
-            layout: this.processGaussiansPipeline.getBindGroupLayout(0),
+        this.computeAABBsBindGroup = this.device.createBindGroup({
+            layout: this.computeAABBsPipeline.getBindGroupLayout(0),
             entries: [
                 {binding: 0, resource: {buffer: this.pointDataBuffer}},
                 {binding: 1, resource: {buffer: this.gaussianDataBuffer}},
-                {binding: 2, resource: {buffer: this.tileCountBuffer}},
-                {binding: 3, resource: {buffer: this.uniformBuffer}},
-                {binding: 4, resource: {buffer: this.numGaussianBuffer}},
-                {binding: 5, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 6, resource: {buffer: this.tileSizeBuffer}}
+                {binding: 2, resource: {buffer: this.cellCountBuffer}},
+                {binding: 3, resource: {buffer: this.numGaussianBuffer}},
+                {binding: 4, resource: {buffer: this.volumeInfoBuffer}},
             ]
         });
 
-        this.writeTileIDsPipeline = this.device.createComputePipeline({
+        this.writeCellIDsPipeline = this.device.createComputePipeline({
             layout: "auto",
             compute: {
                 module: this.device.createShaderModule({
-                    code: write_tile_ids,
+                    code: write_cell_ids,
                 }),
                 entryPoint: "main",
             },
         });
 
-        this.renderTarget = this.device.createTexture({
-            size: [this.canvas.width, this.canvas.height, 1],
-            format: "rgba8unorm",
-            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING |
-                       GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
-        });
-        this.renderTargetCopy = this.device.createTexture({
-            size: [this.canvas.width, this.canvas.height, 1],
-            format: "rgba8unorm",
-            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING |
-                       GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
-        });
-        this.computeTilesPipeline = this.device.createComputePipeline({
+        this.computeCellsPipeline = this.device.createComputePipeline({
             layout: "auto",
             compute: {
                 module: this.device.createShaderModule({
-                    code: compute_tiles.replace(/TILE_SIZE_MACRO/g, String(this.tileSize)),
+                    code: compute_cells,
                 }),
                 entryPoint: "main",
             },
@@ -294,32 +246,6 @@ export class Renderer {
             },
         });
 
-        let renderModule = this.device.createShaderModule({code: render});
-        this.renderPipeline = this.device.createRenderPipeline({
-            layout: "auto",
-            vertex: {
-                module: renderModule,
-                entryPoint: "vertex_main",
-            },
-            fragment: {
-                module: renderModule,
-                entryPoint: "fragment_main",
-                targets: [{format: presentationFormat}]
-            },
-        });
-        const sampler = device.createSampler({
-            magFilter: 'linear',
-            minFilter: 'linear',
-        });    
-        this.renderPipelineBindGroup = device.createBindGroup({
-            layout: this.renderPipeline.getBindGroupLayout(0),
-            entries: [
-                {binding: 0, resource: this.renderTarget.createView()},
-                {binding: 1, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 2, resource: sampler}
-            ]
-        });
-
         // start the animation loop
         requestAnimationFrame(() => this.animate());
     }
@@ -333,16 +259,13 @@ export class Renderer {
         this.pointDataBuffer.destroy();
         this.gaussianDataBuffer.destroy();
         this.gaussianIDBuffer.destroy();
-        this.tileCountBuffer.destroy();
-        this.tileOffsetBuffer.destroy();
-        this.tileIDBuffer.destroy();
+        this.cellCountBuffer.destroy();
+        this.cellOffsetBuffer.destroy();
+        this.cellIDBuffer.destroy();
         this.rangesBuffer.destroy();
         this.numGaussianBuffer.destroy();
-        this.canvasSizeBuffer.destroy();
-        this.tileSizeBuffer.destroy();
-        this.numTilesBuffer.destroy();
-        this.renderTarget.destroy();
-        this.renderTargetCopy.destroy();
+        this.volumeInfoBuffer.destroy();
+        this.cellDataBuffer.destroy();
 
         this.destroyCallback();
     }
@@ -353,73 +276,54 @@ export class Renderer {
             return;
         }
 
-        if (!this.interactiveCamera.isDirty()) {
-            requestAnimationFrame(() => this.animate());
-            return;
-        }
         console.log(`++++++++ New frame ++++++++`);
         var totalStart = performance.now();
 
-        const camera = this.interactiveCamera.getCamera();
-
-        const position = camera.getPosition();
-
-        const tanHalfFovX = 0.5 * this.canvas.width / camera.focalX;
-        const tanHalfFovY = 0.5 * this.canvas.height / camera.focalY;
-
-        this.depthSortMatrix = mat4toArrayOfArrays(camera.viewMatrix);
-
-        let uniformsMatrixBuffer = new ArrayBuffer(this.uniformBuffer.size);
-        let uniforms = {
-            viewMatrix: mat4toArrayOfArrays(camera.viewMatrix),
-            projMatrix: mat4toArrayOfArrays(camera.getProjMatrix()),
-            cameraPosition: Array.from(position),
-            tanHalfFovX: tanHalfFovX,
-            tanHalfFovY: tanHalfFovY,
-            focalX: camera.focalX,
-            focalY: camera.focalY,
-            scaleModifier: camera.scaleModifier,
-        }
-        
-        console.log(uniforms);
-        uniformLayout.pack(0, uniforms, new DataView(uniformsMatrixBuffer));
-
-        this.device.queue.writeBuffer(
-            this.uniformBuffer,
-            0,
-            uniformsMatrixBuffer,
-            0,
-            uniformsMatrixBuffer.byteLength
-        );
-
         { 
             var start = performance.now();
-            // compute the tile counts and precompute per view properties of each gaussian (conic, depth, etc.)
+            // compute the cell counts
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
-            passEncoder.setPipeline(this.processGaussiansPipeline);
-            passEncoder.setBindGroup(0, this.processGaussiansBindGroup);
+            passEncoder.setPipeline(this.computeAABBsPipeline);
+            passEncoder.setBindGroup(0, this.computeAABBsBindGroup);
             passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 256));
             passEncoder.end();
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
             var end = performance.now();
-            console.log(`Compute Gaussians depth took ${end - start} ms`);
+            console.log(`Compute aabbs took ${end - start} ms`);
         }
 
-        // find the offsets for each gaussian to write its tile intersections
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.cellCountBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.cellCountBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
+
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+            var cellCountVals = new Uint32Array(dbgBuffer.getMappedRange());
+            console.log(cellCountVals);
+        }
+
+        // // find the offsets for each gaussian to write its cell intersections
         var commandEncoder = this.device.createCommandEncoder();
-        // we scan the tileOffsetBuffer, so copy the tile count information over
-        commandEncoder.copyBufferToBuffer(this.tileCountBuffer,
+        // we scan the cellOffsetBuffer, so copy the cell count information over
+        commandEncoder.copyBufferToBuffer(this.cellCountBuffer,
             0,
-            this.tileOffsetBuffer,
+            this.cellOffsetBuffer,
             0,
             this.numGaussians * 4);
         this.device.queue.submit([commandEncoder.finish()]);
         var start = performance.now();
-        this.numIntersections = await this.scanTileCounts.scan(this.numGaussians);
+        this.numIntersections = await this.scanCellCounts.scan(this.numGaussians);
         var end = performance.now();
-        console.log(`Scan tile counts took ${end - start} ms`);
+        console.log(`Scan cell counts took ${end - start} ms`);
         console.log(`Found ${this.numIntersections} intersections`);
         this.numIntersectionsBuffer = this.device.createBuffer({
             size: 1 * 4,
@@ -435,52 +339,51 @@ export class Renderer {
         );
         // {
         //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.tileOffsetBuffer.size,
+        //         size: this.cellOffsetBuffer.size,
         //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
         //     });
 
         //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.tileOffsetBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+        //     commandEncoder.copyBufferToBuffer(this.cellOffsetBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
         //     this.device.queue.submit([commandEncoder.finish()]);
         //     await this.device.queue.onSubmittedWorkDone();
 
         //     await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-        //     var tileCountVals = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(tileCountVals);
+        //     var cellCountVals = new Uint32Array(dbgBuffer.getMappedRange());
+        //     console.log(cellCountVals);
         // }
         const sortBuffers = this.sorter.createSortBuffers(this.numIntersections);
-        this.tileIDBuffer = sortBuffers.keys;
+        this.cellIDBuffer = sortBuffers.keys;
         this.gaussianIDBuffer = sortBuffers.values;
 
-        this.writeTileIDsBindGroup = this.device.createBindGroup({
-            layout: this.writeTileIDsPipeline.getBindGroupLayout(0),
+        this.writeCellIDsBindGroup = this.device.createBindGroup({
+            layout: this.writeCellIDsPipeline.getBindGroupLayout(0),
             entries: [
-                {binding: 0, resource: {buffer: this.tileOffsetBuffer}},
+                {binding: 0, resource: {buffer: this.cellOffsetBuffer}},
                 {binding: 1, resource: {buffer: this.gaussianDataBuffer}},
-                {binding: 2, resource: {buffer: this.tileIDBuffer}},
+                {binding: 2, resource: {buffer: this.cellIDBuffer}},
                 {binding: 3, resource: {buffer: this.gaussianIDBuffer}},
                 {binding: 4, resource: {buffer: this.numGaussianBuffer}},
-                {binding: 5, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 6, resource: {buffer: this.tileSizeBuffer}},
+                {binding: 5, resource: {buffer: this.volumeInfoBuffer}},
             ]
         });
         { 
-            // write tile/depth combined IDs at computed offsets for each gaussian
+            // write cell IDs at computed offsets for each gaussian
             var start = performance.now();
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
-            passEncoder.setPipeline(this.writeTileIDsPipeline);
-            passEncoder.setBindGroup(0, this.writeTileIDsBindGroup);
+            passEncoder.setPipeline(this.writeCellIDsPipeline);
+            passEncoder.setBindGroup(0, this.writeCellIDsBindGroup);
             passEncoder.dispatchWorkgroups(Math.ceil(this.numGaussians / 256));
             passEncoder.end();
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
             var end = performance.now();    
-            console.log(`Write Tile IDs took ${end - start} ms`)
+            console.log(`Write cell IDs took ${end - start} ms`)
         }
 
-        // sort gaussian ids by the tile ids so each tile has all the gaussians acting on it
+        // // sort gaussian ids by the cell ids so each cell has all the gaussians acting on it
         var start = performance.now();
         const sortEncoder = this.device.createCommandEncoder();
         this.sorter.sort(sortEncoder, this.device.queue, sortBuffers);
@@ -490,12 +393,12 @@ export class Renderer {
         console.log(`Sort took ${end - start} ms`);
 
         { 
-            // compute the ranges of IDs for each tile to work on
+            // compute the ranges of IDs for each cell to work on
             var start = performance.now();
             this.computeRangesBindGroup = this.device.createBindGroup({
                 layout: this.computeRangesPipeline.getBindGroupLayout(0),
                 entries: [
-                    {binding: 0, resource: {buffer: this.tileIDBuffer}},
+                    {binding: 0, resource: {buffer: this.cellIDBuffer}},
                     {binding: 1, resource: {buffer: this.rangesBuffer}},
                     {binding: 2, resource: {buffer: this.numIntersectionsBuffer}},
                 ]
@@ -511,97 +414,108 @@ export class Renderer {
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
             var end = performance.now();
-            console.log(`Compute tile ranges took ${end - start} ms`);
+            console.log(`Compute cell ranges took ${end - start} ms`);
         }
 
-        // {
-        //     var dbgBuffer = this.device.createBuffer({
-        //         size: this.tileIDBuffer.size,
-        //         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        //     });
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.rangesBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
 
-        //     var commandEncoder = this.device.createCommandEncoder();
-        //     commandEncoder.copyBufferToBuffer(this.tileIDBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
-        //     this.device.queue.submit([commandEncoder.finish()]);
-        //     await this.device.queue.onSubmittedWorkDone();
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.rangesBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            this.device.queue.submit([commandEncoder.finish()]);
+            await this.device.queue.onSubmittedWorkDone();
 
-        //     await dbgBuffer.mapAsync(GPUMapMode.READ);
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-        //     var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
-        //     console.log(debugValsf);
-        // }
+            var debugValsf = new Uint32Array(dbgBuffer.getMappedRange());
+            console.log(debugValsf);
+        }
 
         { 
-            // compute the final image - each pixel accumulates the colors of the gaussians in its tile
+            // compute the final image - each cell averages the values of the gaussians in it
             var start = performance.now();
-            this.computeTilesBindGroup = this.device.createBindGroup({
-                layout: this.computeTilesPipeline.getBindGroupLayout(0),
+            this.computeCellsBindGroup = this.device.createBindGroup({
+                layout: this.computeCellsPipeline.getBindGroupLayout(0),
                 entries: [
-                    {binding: 0, resource: this.renderTarget.createView()},
+                    {binding: 0, resource: {buffer: this.cellDataBuffer}},
                     {binding: 1, resource: {buffer: this.rangesBuffer}},
                     {binding: 2, resource: {buffer: this.gaussianIDBuffer}},
-                    {binding: 3, resource: {buffer: this.gaussianDataBuffer}},
-                    {binding: 4, resource: {buffer: this.canvasSizeBuffer}},
-                    {binding: 5, resource: {buffer: this.tileSizeBuffer}},
-                    {binding: 6, resource: {buffer: this.uniformBuffer}},
+                    {binding: 3, resource: {buffer: this.volumeInfoBuffer}},
                 ]
             });
             const commandEncoder = this.device.createCommandEncoder();
             const passEncoder = commandEncoder.beginComputePass();
-            passEncoder.setPipeline(this.computeTilesPipeline);
-            passEncoder.setBindGroup(0, this.computeTilesBindGroup);
-            passEncoder.dispatchWorkgroups(Math.ceil(this.canvas.width / this.tileSize), Math.ceil(this.canvas.height / this.tileSize));
+            passEncoder.setPipeline(this.computeCellsPipeline);
+            passEncoder.setBindGroup(0, this.computeCellsBindGroup);
+            passEncoder.dispatchWorkgroups(Math.ceil(this.numCells[0] * this.numCells[1] * this.numCells[2] / 256));
             passEncoder.end();
 
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
             var end = performance.now();
-            console.log(`Compute tiles took ${end - start} ms`);
+            console.log(`Compute cells took ${end - start} ms`);
         }
 
-        { 
-            // blit the computed image onto the screen
-            var start = performance.now();
-            const commandEncoder = this.device.createCommandEncoder();
+        {
+            var dbgBuffer = this.device.createBuffer({
+                size: this.cellDataBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
 
-            const renderPassDesc = {
-                colorAttachments: [{
-                    view: this.contextGpu.getCurrentTexture().createView(),
-                    loadOp: "clear" as GPULoadOp,
-                    clearValue: [0.3, 0.3, 0.3, 1],
-                    storeOp: "store" as GPUStoreOp
-                }],
-            };
-            const renderPass = commandEncoder.beginRenderPass(renderPassDesc);
-
-            renderPass.setPipeline(this.renderPipeline);
-            renderPass.setBindGroup(0, this.renderPipelineBindGroup);
-
-            // Draw a full screen quad
-            renderPass.draw(6, 1, 0, 0);
-            renderPass.end();
+            var commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(this.cellDataBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
-            var end = performance.now();
-            console.log(`Rendering took ${end - start} ms`);
+
+            await dbgBuffer.mapAsync(GPUMapMode.READ);
+
+            var debugVals = new Float32Array(dbgBuffer.getMappedRange());
+            console.log(debugVals);
         }
+
         this.numFrames++;
         // clear everything for next pass
         var commandEncoder = this.device.createCommandEncoder();
-        commandEncoder.clearBuffer(this.tileCountBuffer);
+        commandEncoder.clearBuffer(this.cellCountBuffer);
         commandEncoder.clearBuffer(this.gaussianDataBuffer);
         commandEncoder.clearBuffer(this.rangesBuffer);
+        commandEncoder.clearBuffer(this.cellDataBuffer);
         sortBuffers.destroy();
-        commandEncoder.copyTextureToTexture(
-            { texture: this.renderTargetCopy}, 
-            { texture: this.renderTarget},
-            { width: this.canvas.width, height: this.canvas.height, depthOrArrayLayers: 1 });
         this.device.queue.submit([commandEncoder.finish()]);
         await this.device.queue.onSubmittedWorkDone();
         var totalEnd = performance.now();
 
         console.log(`TOTAL FRAME TIME: ${totalEnd - totalStart} ms`);
         console.log("------------------------------------------");
-        requestAnimationFrame(() => this.animate());
+        // requestAnimationFrame(() => this.animate());
+
+        let vtkContent = '';
+
+        // Header information
+        vtkContent += '# vtk DataFile Version 3.0\n';
+        vtkContent += 'Volume Data Example\n';
+        vtkContent += 'ASCII\n';
+        vtkContent += 'DATASET STRUCTURED_POINTS\n';
+
+        // Grid dimensions
+        vtkContent += `DIMENSIONS ${this.numCells[0]} ${this.numCells[1]} ${this.numCells[2]}\n`;
+        vtkContent += 'SPACING 1.0 1.0 1.0\n';
+        vtkContent += 'ORIGIN 0.0 0.0 0.0\n';
+
+        // Scalar field data
+        vtkContent += `POINT_DATA ${this.numCells[0] * this.numCells[1] * this.numCells[2]}\n`;
+        vtkContent += 'SCALARS volume_scalars float 1\n';
+        vtkContent += 'LOOKUP_TABLE default\n';
+
+        // Add scalar values in row-major order
+        for (let i = 0; i < debugVals.length; i++) {
+            vtkContent += debugVals[i].toFixed(6) + '\n';  // 6 decimal places for precision
+        }
+
+        const blob = new Blob([vtkContent], { type: 'text/plain;charset=utf-8' });
+        saveAs(blob, "volume_cells.vtk");
     }
 }
