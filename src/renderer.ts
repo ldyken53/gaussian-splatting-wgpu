@@ -140,7 +140,7 @@ export class Renderer {
 
         // buffer for gaussian info needed for computing cells
         this.gaussianDataBuffer = this.device.createBuffer({
-            size: this.numGaussians * (8) * 4, // vec3, vec3, f32 with alignment rules
+            size: this.numGaussians * (24) * 4, // vec3, vec3, f32 with alignment rules
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             label: "renderer.gaussianDataBuffer"
         });
@@ -296,18 +296,18 @@ export class Renderer {
 
         {
             var dbgBuffer = this.device.createBuffer({
-                size: this.cellCountBuffer.size,
+                size: this.gaussianDataBuffer.size,
                 usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
             });
 
             var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.cellCountBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            commandEncoder.copyBufferToBuffer(this.gaussianDataBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
 
             await dbgBuffer.mapAsync(GPUMapMode.READ);
 
-            var cellCountVals = new Uint32Array(dbgBuffer.getMappedRange());
+            var cellCountVals = new Float32Array(dbgBuffer.getMappedRange());
             console.log(cellCountVals);
         }
 
@@ -443,7 +443,8 @@ export class Renderer {
                     {binding: 0, resource: {buffer: this.cellDataBuffer}},
                     {binding: 1, resource: {buffer: this.rangesBuffer}},
                     {binding: 2, resource: {buffer: this.gaussianIDBuffer}},
-                    {binding: 3, resource: {buffer: this.volumeInfoBuffer}},
+                    {binding: 3, resource: {buffer: this.gaussianDataBuffer}},
+                    {binding: 4, resource: {buffer: this.volumeInfoBuffer}},
                 ]
             });
             const commandEncoder = this.device.createCommandEncoder();

@@ -1,7 +1,10 @@
 struct AABBs {
+    conic: array<f32, 6>,
     start_cell: vec3<u32>,
+    det: f32,
     end_cell: vec3<u32>,
-    value: f32
+    value: f32,
+    mean: vec3<f32>
 };
 struct Uniforms {
     volume_mins: vec3<f32>,
@@ -12,7 +15,7 @@ struct Uniforms {
 @group(0) @binding(0) var<storage, read> cell_offsets: array<u32>;
 @group(0) @binding(1) var<storage, read> gaussian_data: array<AABBs>;
 @group(0) @binding(2) var<storage, read_write> cell_ids: array<u32>;
-@group(0) @binding(3) var<storage, read_write> gaussian_ids: array<f32>;
+@group(0) @binding(3) var<storage, read_write> gaussian_ids: array<u32>;
 @group(0) @binding(4) var<uniform> n_unpadded: u32;
 @group(0) @binding(5) var<uniform> uniforms: Uniforms;
 
@@ -29,7 +32,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var y = gaussian.start_cell.y; y < gaussian.end_cell.y; y += 1) {
             for (var x = gaussian.start_cell.x; x < gaussian.end_cell.x; x += 1) {
                 cell_ids[offs] = z * num_cells.x * num_cells.y + y * num_cells.x + x;
-                gaussian_ids[offs] = gaussian.value;
+                gaussian_ids[offs] = global_id.x;
                 offs++;
             }
         }

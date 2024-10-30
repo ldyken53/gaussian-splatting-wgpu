@@ -6,9 +6,12 @@ struct PointInput {
     @location(4) rot: vec4<f32>,
 };
 struct AABBs {
+    conic: array<f32, 6>,
     start_cell: vec3<u32>,
+    det: f32,
     end_cell: vec3<u32>,
-    value: f32
+    value: f32,
+    mean: vec3<f32>
 };
 struct Uniforms {
     volume_mins: vec3<f32>,
@@ -29,26 +32,65 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     } else {
         let gaussian = point_data[global_id.x];
+        aabbs[global_id.x].mean = gaussian.position;
         let R : mat3x3<f32> = build_rotation(gaussian.rot);
+
+        // Build scale matrix
+        let S = mat3x3<f32>(
+          exp(gaussian.log_scale.x), 0., 0.,
+          0., exp(gaussian.log_scale.y), 0.,
+          0., 0., exp(gaussian.log_scale.z),
+        );
+        
+        // Compute 3D covariance matrix and precompute conic
+        let M = S * R;
+        let Sigma = transpose(M) * M;
+        // Epsilon for numerical stability
+        let epsilon = max(max(abs(Sigma[0][0]), abs(Sigma[1][1])), abs(Sigma[2][2])) * 1e-5;
+        let cov3d = array<f32, 6> (
+          Sigma[0][0] + epsilon,
+          Sigma[0][1],
+          Sigma[0][2],
+          Sigma[1][1] + epsilon,
+          Sigma[1][2],
+          Sigma[2][2] + epsilon,
+        );
+        let conic = compute_3d_conic(cov3d);
+        aabbs[global_id.x].conic = conic;
+
+        // For normalization
+        let a = cov3d[0]; // Sigma[0][0]
+        let b = cov3d[1]; // Sigma[0][1]
+        let c = cov3d[2]; // Sigma[0][2]
+        let d = cov3d[3]; // Sigma[1][1]
+        let e = cov3d[4]; // Sigma[1][2]
+        let f = cov3d[5]; // Sigma[2][2]
+        let det = a * (d * f - e * e) - b * (b * f - c * e) + c * (b * e - c * d);
+        aabbs[global_id.x].det = det;
+
         // Bound Gaussians by 3 * the standard deviation
         let m = 1.0;
-        let S : vec3<f32> = vec3<f32>(
-          exp(gaussian.log_scale.x) * m, 
-          exp(gaussian.log_scale.y) * m, 
-          exp(gaussian.log_scale.z) * m,
+        let scaled_S : vec3<f32> = vec3<f32>(
+          S[0][0] * m, 
+          S[1][1] * m, 
+          S[2][2] * m,
         );
+
+        // Find max and min (x,y,z) of bounding box
         let n = array<f32, 2>(-1.0, 1.0);
         var mins = gaussian.position;
         var maxes = gaussian.position;
         for (var i = 0; i < 2; i++) {
           for (var j = 0; j < 2; j++) {
             for (var k = 0; k < 2; k++) {
-              let corner = gaussian.position + n[i] * R[0] * S[0] + n[j] * R[1] * S[1] + n[k] * R[2] * S[2];
+              let corner = gaussian.position + n[i] * R[0] * scaled_S[0] + n[j] * R[1] * scaled_S[1] + n[k] * R[2] * scaled_S[2];
               maxes = max(maxes, corner);
               mins = min(mins, corner);
             }
           }
         }
+        
+        // Compute max and min (x, y, z) of cells
         let start_cell = max(
             vec3<u32>(floor((mins - vec3<f32>(uniforms.volume_mins)) / uniforms.cell_size)),
             vec3<u32>(0)
@@ -81,4 +123,32 @@ fn build_rotation(rot: vec4<f32>) -> mat3x3<f32> {
   );
 
   return R;
+}
+
+fn compute_3d_conic(cov: array<f32, 6>) -> array<f32, 6> {    
+    let a = cov[0]; // Sigma[0][0]
+    let b = cov[1]; // Sigma[0][1]
+    let c = cov[2]; // Sigma[0][2]
+    let d = cov[3]; // Sigma[1][1]
+    let e = cov[4]; // Sigma[1][2]
+    let f = cov[5]; // Sigma[2][2]
+    
+    let det = a * (d * f - e * e) - b * (b * f - c * e) + c * (b * e - c * d);
+    let det_inv = 1.0 / det;
+
+    let conic_a = (d * f - e * e) * det_inv;
+    let conic_b = (c * e - b * f) * det_inv;
+    let conic_c = (b * e - c * d) * det_inv;
+    let conic_d = (a * f - c * c) * det_inv;
+    let conic_e = (b * c - a * e) * det_inv;
+    let conic_f = (a * d - b * b) * det_inv;
+    
+    return array<f32, 6> (
+      conic_a,
+      conic_b,
+      conic_c,
+      conic_d,
+      conic_e,
+      conic_f,
+    );
 }
