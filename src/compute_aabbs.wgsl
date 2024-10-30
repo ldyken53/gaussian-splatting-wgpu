@@ -5,13 +5,14 @@ struct PointInput {
     @location(3) opacity: f32,
     @location(4) rot: vec4<f32>,
 };
-struct AABBs {
+struct Gaussian {
     conic: array<f32, 6>,
     start_cell: vec3<u32>,
     det: f32,
     end_cell: vec3<u32>,
     value: f32,
-    mean: vec3<f32>
+    mean: vec3<f32>,
+    volume: f32
 };
 struct Uniforms {
     volume_mins: vec3<f32>,
@@ -20,7 +21,7 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var<storage, read> point_data: array<PointInput>;
-@group(0) @binding(1) var<storage, read_write> aabbs: array<AABBs>;
+@group(0) @binding(1) var<storage, read_write> aabbs: array<Gaussian>;
 @group(0) @binding(2) var<storage, read_write> cell_counts: array<u32>;
 @group(0) @binding(3) var<uniform> n_unpadded: u32;
 @group(0) @binding(4) var<uniform> uniforms: Uniforms;
@@ -42,7 +43,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
           0., 0., exp(gaussian.log_scale.z),
         );
         
-        // Compute 3D covariance matrix and precompute conic
+        // Compute 3D covariance matrix and precompute conic and volume
         let M = S * R;
         let Sigma = transpose(M) * M;
         // Epsilon for numerical stability
@@ -69,7 +70,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         aabbs[global_id.x].det = det;
 
         // Bound Gaussians by 3 * the standard deviation
-        let m = 1.0;
+        let m = 3.0;
         let scaled_S : vec3<f32> = vec3<f32>(
           S[0][0] * m, 
           S[1][1] * m, 
@@ -104,6 +105,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         aabbs[global_id.x].start_cell = start_cell;
         aabbs[global_id.x].end_cell = end_cell;
         aabbs[global_id.x].value = gaussian.value;
+        aabbs[global_id.x].volume = f32(cell_dims.x * cell_dims.y * cell_dims.z);
     }
 }
 

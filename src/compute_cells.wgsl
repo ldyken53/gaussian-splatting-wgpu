@@ -4,7 +4,8 @@ struct Gaussian {
     det: f32,
     end_cell: vec3<u32>,
     value: f32,
-    mean: vec3<f32>
+    mean: vec3<f32>,
+    volume: f32
 };
 struct Uniforms {
     volume_mins: vec3<f32>,
@@ -46,8 +47,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Normalize makes Gaussians have equal weight integral of 1
         // over the entire volume, regardless of scale
         // i.e. smaller Gaussians have higher peak weight
+        // let log_norm = -1.5 * log(2.0 * 3.14159) - 0.5 * log(gaussian.det);
+        // let normalize_factor = exp(log_norm);
+        let normalize_factor = 1.0 / gaussian.volume;
         // let normalize_factor = 1.0 / (pow(2.0 * 3.14159, 1.5) * sqrt(gaussian.det));
-        let normalize_factor = 1.0;
+        // let normalize_factor = 1.0;
         let weight = normalize_factor * exp(-0.5 * quad_form * scale_modifier);
         // if (exp(-0.5 * quad_form * scale_modifier) > 1) {
         //     // Break on purpose, numerical issue !!!

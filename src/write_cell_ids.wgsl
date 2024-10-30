@@ -1,10 +1,11 @@
-struct AABBs {
+struct Gaussian {
     conic: array<f32, 6>,
     start_cell: vec3<u32>,
     det: f32,
     end_cell: vec3<u32>,
     value: f32,
-    mean: vec3<f32>
+    mean: vec3<f32>,
+    volume: f32
 };
 struct Uniforms {
     volume_mins: vec3<f32>,
@@ -13,7 +14,7 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var<storage, read> cell_offsets: array<u32>;
-@group(0) @binding(1) var<storage, read> gaussian_data: array<AABBs>;
+@group(0) @binding(1) var<storage, read> gaussian_data: array<Gaussian>;
 @group(0) @binding(2) var<storage, read_write> cell_ids: array<u32>;
 @group(0) @binding(3) var<storage, read_write> gaussian_ids: array<u32>;
 @group(0) @binding(4) var<uniform> n_unpadded: u32;
