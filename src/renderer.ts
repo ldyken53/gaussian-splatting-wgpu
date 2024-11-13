@@ -94,6 +94,8 @@ export class Renderer {
     ) {
         this.volumeMins = [-0.889295, -0.40698457, 2.508658]; 
         this.volumeMaxes = [0.7828097, 0.428498, 3.512667];
+        // this.volumeMins = [-0.75, -0.3, 2.8]; 
+        // this.volumeMaxes = [0.75, 0.3, 3.2];
         this.cellSize = 0.02;
         this.canvas = canvas;
         this.interactiveCamera = interactiveCamera;
@@ -167,14 +169,14 @@ export class Renderer {
         this.device.queue.writeBuffer(
             this.volumeInfoBuffer,
             0,
-            new Float32Array([-0.889295, -0.40698457, 2.508658, this.cellSize, 0.7828097, 0.428498, 3.512667]),
+            new Float32Array([this.volumeMins[0], this.volumeMins[1], this.volumeMins[2], this.cellSize, this.volumeMaxes[0], this.volumeMaxes[1], this.volumeMaxes[2]]),
             0,
             7
         );
         this.numCells = [
-            Math.ceil((0.7828097 - (-0.889295)) / this.cellSize),
-            Math.ceil((0.428498 - (-0.40698457)) / this.cellSize),
-            Math.ceil((3.512667 - (2.508658)) / this.cellSize)
+            Math.ceil((this.volumeMaxes[0] - this.volumeMins[0]) / this.cellSize),
+            Math.ceil((this.volumeMaxes[1] - this.volumeMins[1]) / this.cellSize),
+            Math.ceil((this.volumeMaxes[2] - this.volumeMins[2]) / this.cellSize)
         ];
         console.log(`Cells per dimension:
             x: ${this.numCells[0]}
@@ -296,12 +298,12 @@ export class Renderer {
 
         {
             var dbgBuffer = this.device.createBuffer({
-                size: this.gaussianDataBuffer.size,
+                size: this.cellCountBuffer.size,
                 usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
             });
 
             var commandEncoder = this.device.createCommandEncoder();
-            commandEncoder.copyBufferToBuffer(this.gaussianDataBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
+            commandEncoder.copyBufferToBuffer(this.cellCountBuffer, 0, dbgBuffer, 0, dbgBuffer.size);
             this.device.queue.submit([commandEncoder.finish()]);
             await this.device.queue.onSubmittedWorkDone();
 
@@ -309,6 +311,13 @@ export class Renderer {
 
             var cellCountVals = new Float32Array(dbgBuffer.getMappedRange());
             console.log(cellCountVals);
+            let count = 0;
+            for (let i of cellCountVals) {
+                if (i == 0) {
+                    count += 1;
+                }
+            }
+            console.log(count);
         }
 
         // // find the offsets for each gaussian to write its cell intersections
