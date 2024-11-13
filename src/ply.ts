@@ -37,6 +37,8 @@ export class PackedGaussians {
     */
     numGaussians: number;
     sphericalHarmonicsDegree: number;
+    mins: [number, number, number];
+    maxes: [number, number, number];
 
     gaussianLayout: PackingType;
     public gaussianArrayLayout: PackingType;
@@ -162,8 +164,8 @@ export class PackedGaussians {
         var positionWriteOffset = 0;
         var minVal = 10;
         var maxVal = 0;
-        var mins = [10.0, 10.0, 10.0];
-        var maxes = [-10.0, -10.0, -10.0];
+        var mins: [number, number, number] = [10.0, 10.0, 10.0];
+        var maxes: [number, number, number] = [-10.0, -10.0, -10.0];
         for (let i = 0; i < vertexCount; i++) {
             const line = vertexLines[i].trim();
             const rawVertex = this.readRawVertex(line, propertyTypes);
@@ -203,5 +205,7 @@ export class PackedGaussians {
             if (mins[i] < min) { min = mins[i] }
             if (maxes[i] > max) { max = maxes[i] }
         }
+        this.mins = mins;
+        this.maxes = maxes;
     }
 }

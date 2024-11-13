@@ -92,8 +92,8 @@ export class Renderer {
         gaussians: PackedGaussians,
         tileSize: number
     ) {
-        this.volumeMins = [-0.889295, -0.40698457, 2.508658]; 
-        this.volumeMaxes = [0.7828097, 0.428498, 3.512667];
+        this.volumeMins = gaussians.mins; 
+        this.volumeMaxes = gaussians.maxes;
         // this.volumeMins = [-0.75, -0.3, 2.8]; 
         // this.volumeMaxes = [0.75, 0.3, 3.2];
         this.cellSize = 0.02;
