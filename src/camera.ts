@@ -234,8 +234,8 @@ export class InteractiveCamera {
 
         this.canvas.addEventListener('mousemove', (e) => {
             if (!this.drag) return false;
-            this.dRX = (e.movementX * 2 * Math.PI) / this.canvas.width
-            this.dRY = (-e.movementY * 2 * Math.PI) / this.canvas.height
+            this.dRX = (e.movementX * 4 * Math.PI) / this.canvas.width
+            this.dRY = (-e.movementY * 4 * Math.PI) / this.canvas.height
             this.oldX = e.pageX;
             this.oldY = e.pageY;
             this.setDirty();
@@ -251,20 +251,20 @@ export class InteractiveCamera {
         window.addEventListener('keydown', (e) => {
             const keyMap: {[key: string]: () => void} = {
                 // translation
-                'w': () => { this.dTY -= 0.1 },
-                's': () => { this.dTY += 0.1 },
-                'a': () => { this.dTX -= 0.1 },
-                'd': () => { this.dTX += 0.1 },
-                'q': () => { this.dTZ += 0.1 },
-                'e': () => { this.dTZ -= 0.1 },
+                'w': () => { this.dTY -= 0.2 },
+                's': () => { this.dTY += 0.2 },
+                'a': () => { this.dTX -= 0.2 },
+                'd': () => { this.dTX += 0.2 },
+                'q': () => { this.dTZ += 0.2 },
+                'e': () => { this.dTZ -= 0.2 },
 
                 // rotation
-                'j': () => { this.dRX += 0.1 },
-                'l': () => { this.dRX -= 0.1 },
-                'i': () => { this.dRY += 0.1 },
-                'k': () => { this.dRY -= 0.1 },
-                'u': () => { this.dRZ += 0.1 },
-                'o': () => { this.dRZ -= 0.1 },
+                'j': () => { this.dRX += 0.2 },
+                'l': () => { this.dRX -= 0.2 },
+                'i': () => { this.dRY += 0.2 },
+                'k': () => { this.dRY -= 0.2 },
+                'u': () => { this.dRZ += 0.2 },
+                'o': () => { this.dRZ -= 0.2 },
             }
 
             if (!keyMap[e.key]) {
