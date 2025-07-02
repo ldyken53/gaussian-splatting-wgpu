@@ -5,43 +5,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
-                           integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
-                           crossorigin="anonymous">
-
+          integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
+          crossorigin="anonymous">
     <title>WebGPU Gaussian Splatting</title>
 </head>
 <body>
     <div class="container mt-4">
         <div class="row">
-            <div style="display: none" id="loading-popup">Loading .ply, this may take from seconds to a couple of minutes</div>
-            <div class="col-12 text-center">
-                <h4>WebGPU Gaussian Splatting</h4>
-                <canvas id="webgpu-canvas" class="img-fluid" width="800" height="800"></canvas>
-                <select name="tileSize" id="tileSize">
-                    <option value="8">8</option>
-                    <option value="16">16</option>
-                    <option value="32">32</option>
-                </select>
-                <button style="display:block" onclick="document.getElementById('plyButton').click()">Choose
-                    point_cloud.ply</button>
-                <input type="file" accept=".ply" style="display:none" id="plyButton" />
-                <label for="tileSize">Tile Size</label>
-                <button style="display:block" onclick="document.getElementById('cameraButton').click()">Choose
-                    cameras.json</button>
-                <input type="file" accept=".json" style="display:none" id="cameraButton" />
+            <div class="col-md-3">
+                <h5>Options</h5>
+                <div id="loading-popup" style="display: none">
+                    Loading .ply, this may take from seconds to a couple of minutes
+                </div>
 
-                <label for="cameraList">Available cameras:</label>
-                <ul id="cameraList">
-                    <li>(choose cameras.json to load)</li>
-                </ul>
-                <div class="col-12 alert alert-danger" id="no-webgpu" style="display:none;">
-                    <h4>Error: Your browser does not support WebGPU</h4>
+                <div class="form-group">
+                    <label for="tileSize">Tile Size</label>
+                    <select class="form-control" name="tileSize" id="tileSize">
+                        <option value="8">8</option>
+                        <option value="16">16</option>
+                        <option value="32">32</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <button class="btn btn-primary btn-block" onclick="document.getElementById('plyButton').click()">Choose point_cloud.ply</button>
+                    <input type="file" accept=".ply" style="display:none" id="plyButton" />
+                </div>
+
+                <div class="form-group">
+                    <button class="btn btn-secondary btn-block" onclick="document.getElementById('cameraButton').click()">Choose cameras.json</button>
+                    <input type="file" accept=".json" style="display:none" id="cameraButton" />
+                </div>
+
+                <div class="form-group">
+                    <label for="cameraList">Available cameras:</label>
+                    <ul id="cameraList" class="list-unstyled">
+                        <li>(choose cameras.json to load)</li>
+                    </ul>
+                </div>
+
+                <div class="alert alert-danger" id="no-webgpu" style="display:none;">
+                    <h5>Error: Your browser does not support WebGPU</h5>
                     <p>You can find out how to get access to it in Chrome Canary
                     <a href="https://web.dev/gpu/#use">here</a>.</p>
                 </div>
+            </div>
+            <div class="col-md-9 text-center">
+                <canvas id="webgpu-canvas" class="img-fluid" width="800" height="800"></canvas>
             </div>
         </div>
     </div>
 </body>
 </html>
-
