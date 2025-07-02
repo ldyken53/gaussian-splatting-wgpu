@@ -120,9 +120,9 @@ export class PackedGaussians {
         /* arranges a raw vertex into a vertex that can be packed by the gaussianLayout utility */
         const arrangedVertex: Record<string, any> = {
             position: [rawVertex.x, rawVertex.y, rawVertex.z],
-            value: rawVertex.value,
+            value: 1 / (1 + Math.exp(-rawVertex.value)),
             logScale: [rawVertex.scale_0, rawVertex.scale_1, rawVertex.scale_2],
-            opacity: rawVertex.opacity,
+            opacity: rawVertex.weight ? 1 / (1 + Math.exp(-rawVertex.weight)) : 1,
             rotQuat: [rawVertex.rot_0, rawVertex.rot_1, rawVertex.rot_2, rawVertex.rot_3],
         };
         return arrangedVertex;
@@ -183,6 +183,6 @@ export class PackedGaussians {
                 minVal = rawVertex.value;
             }
         }
-        console.log(`Range: [${minVal}, ${maxVal}]`);
+        console.log(`Range: [${1 / (1 + Math.exp(minVal))}, ${1 / (1 + Math.exp(maxVal))}]`);
     }
 }
