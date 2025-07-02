@@ -31,6 +31,7 @@ struct Uniforms {
 @group(0) @binding(4) var<uniform> n_unpadded: u32;
 @group(0) @binding(5) var<uniform> canvas_size: vec2<u32>;
 @group(0) @binding(6) var<uniform> tile_size: u32;
+@group(0) @binding(7) var<storage, read> opacity_function: array<f32>;
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -115,10 +116,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             result.b = 1.0;
         }
         let color = vec3<f32>(1.0, gaussian.value, 0.0);
-        var opacity = gaussian.opacity;
-        if (clamped_value < 0.2) {
-          opacity = 0.0;
-        }
+        var opacity = opacity_function[u32(99 * clamped_value)];
         // save data so it doesn't have to be recomputed when computing tiles
         gaussian_data[global_id.x] = GaussianData(
             point_uv,

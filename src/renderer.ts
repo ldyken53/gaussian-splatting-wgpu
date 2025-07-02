@@ -56,6 +56,8 @@ export class Renderer {
     tileOffsetBuffer: GPUBuffer; // filled with output of prefix sum on tileCountBuffer
     tileIDBuffer: GPUBuffer; // tile IDs for each gaussian
     rangesBuffer: GPUBuffer; // tile ranges for each pixel, pixel index written with stopping point in sorted gaussian buffer
+    opacityBuffer: GPUBuffer;
+    opacityUpdated: boolean = false;
 
     numGaussianBuffer: GPUBuffer;
     canvasSizeBuffer: GPUBuffer;
@@ -188,6 +190,12 @@ export class Renderer {
             1
         );
 
+        this.opacityBuffer = this.device.createBuffer({
+            size: 100 * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            label: "renderer.opacityBuffer"
+        });
+
         // buffer for the canvas size, set once
         this.canvasSizeBuffer = this.device.createBuffer({
             size: 2 * 4,
@@ -248,7 +256,8 @@ export class Renderer {
                 {binding: 3, resource: {buffer: this.uniformBuffer}},
                 {binding: 4, resource: {buffer: this.numGaussianBuffer}},
                 {binding: 5, resource: {buffer: this.canvasSizeBuffer}},
-                {binding: 6, resource: {buffer: this.tileSizeBuffer}}
+                {binding: 6, resource: {buffer: this.tileSizeBuffer}},
+                {binding: 7, resource: {buffer: this.opacityBuffer}}
             ]
         });
 
@@ -353,7 +362,7 @@ export class Renderer {
             return;
         }
 
-        if (!this.interactiveCamera.isDirty()) {
+        if (!this.interactiveCamera.isDirty() && !this.opacityUpdated) {
             requestAnimationFrame(() => this.animate());
             return;
         }
@@ -602,6 +611,26 @@ export class Renderer {
 
         console.log(`TOTAL FRAME TIME: ${totalEnd - totalStart} ms`);
         console.log("------------------------------------------");
+        this.opacityUpdated = false;
         requestAnimationFrame(() => this.animate());
+    }
+
+    public updateOpacity(buffer: number[]) {
+        let newBuffer = this.device.createBuffer({
+            size: 100 * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+            mappedAtCreation: true
+        });
+        new Float32Array(newBuffer.getMappedRange()).set(new Float32Array(buffer));
+        newBuffer.unmap();
+        var commandEncoder = this.device.createCommandEncoder();
+        commandEncoder.copyBufferToBuffer(newBuffer,
+            0,
+            this.opacityBuffer,
+            0,
+            100 * 4
+        );
+        this.device.queue.submit([commandEncoder.finish()]);    
+        this.opacityUpdated = true;
     }
 }

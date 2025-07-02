@@ -8,6 +8,43 @@
           integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
           crossorigin="anonymous">
     <title>WebGPU Gaussian Splatting</title>
+    <style>
+        .opacity-editor {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #f8f9fa;
+        }
+        #opacityCanvas {
+            cursor: crosshair;
+            background: white;
+            border-radius: 4px;
+        }
+        .opacity-controls {
+            padding: 8px;
+            background: #e9ecef;
+            border-top: 1px solid #ddd;
+        }
+        .opacity-controls .btn {
+            font-size: 0.8rem;
+            padding: 4px 8px;
+            margin: 2px;
+        }
+        .opacity-output {
+            max-height: 120px;
+            overflow-y: auto;
+            font-size: 0.7rem;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            padding: 8px;
+            margin-top: 8px;
+        }
+        .opacity-info {
+            font-size: 0.75rem;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+    </style>
 </head>
 <body>
     <div class="container mt-4">
@@ -44,6 +81,24 @@
                     </ul>
                 </div>
 
+                <div class="form-group">
+                    <label>Opacity Transfer Function</label>
+                    <div class="opacity-info">
+                        Click: add point, Drag: move, Right-click: remove
+                    </div>
+                    <div class="opacity-editor">
+                        <canvas id="opacityCanvas" width="250" height="180"></canvas>
+                        <div class="opacity-controls">
+                            <button id="clearOpacityBtn" class="btn btn-sm btn-outline-secondary">Clear</button>
+                            <button id="resetOpacityBtn" class="btn btn-sm btn-outline-secondary">Reset</button>
+                            <button id="getOpacityBtn" class="btn btn-sm btn-outline-primary">Get Function</button>
+                        </div>
+                    </div>
+                    <div class="opacity-output" id="opacityOutput">
+                        Opacity function will appear here...
+                    </div>
+                </div>
+
                 <div class="alert alert-danger" id="no-webgpu" style="display:none;">
                     <h5>Error: Your browser does not support WebGPU</h5>
                     <p>You can find out how to get access to it in Chrome Canary
@@ -55,5 +110,7 @@
             </div>
         </div>
     </div>
+
+
 </body>
 </html>

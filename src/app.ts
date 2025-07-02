@@ -1,6 +1,7 @@
 import { CameraFileParser, InteractiveCamera } from "./camera";
 import { loadFileAsArrayBuffer, PackedGaussians } from "./ply";
 import { Renderer } from "./renderer";
+import { OpacityTransferFunction } from "./OpacityTransferFunction";
 import { guessWorkgroupSize } from "./radix_sort/utils";
 
 (async () => {
@@ -32,6 +33,7 @@ import { guessWorkgroupSize } from "./radix_sort/utils";
     const cameraList = document.getElementById('cameraList')! as HTMLUListElement;
     let interactiveCamera = InteractiveCamera.default(canvas);
     var currentRenderer: Renderer;
+    let opacityTransferFunction = new OpacityTransferFunction();
 
     function handlePlyChange(event: any) {
         const file = event.target.files[0];
@@ -43,6 +45,9 @@ import { guessWorkgroupSize } from "./radix_sort/utils";
 
             const gaussians = new PackedGaussians(arrayBuffer);
             const renderer = new Renderer(canvas, interactiveCamera, device, gaussians, parseInt(tileSizeSlider.value));
+            opacityTransferFunction.setUpdateCallback((buffer: number[]) => {
+                renderer.updateOpacity(buffer);
+            });
             currentRenderer = renderer;
             loadingPopup.style.display = 'none'; // hide loading popup
         }
