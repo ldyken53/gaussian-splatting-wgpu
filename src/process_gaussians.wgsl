@@ -92,7 +92,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // tiles[global_id.x] = tile_id * 1000 + u32(depth);
         
         var result: vec3<f32>;
-        let clamped_value = clamp(gaussian.value * -1.0 + 1.0, 0.0, 1.0);
+        let clamped_value = clamp(gaussian.value, 0.0, 1.0);
         if (clamped_value <= 0.2) {
             result.r = 1.0;
             result.g = clamped_value * 5.0;
@@ -115,7 +115,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             result.b = 1.0;
         }
         let color = vec3<f32>(1.0, gaussian.value, 0.0);
-        let opacity = sigmoid(gaussian.opacity) * 10;
+        var opacity = gaussian.opacity;
+        if (clamped_value < 0.2) {
+          opacity = 0.0;
+        }
         // save data so it doesn't have to be recomputed when computing tiles
         gaussian_data[global_id.x] = GaussianData(
             point_uv,
