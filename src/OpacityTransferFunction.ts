@@ -24,7 +24,6 @@ export class OpacityTransferFunction {
     private dragging: boolean;
     private dragIndex: number;
     private pointRadius: number;
-    private outputElement: HTMLElement | null;
     private onUpdateCallback: OpacityUpdateCallback | null;
 
     constructor(onUpdate?: OpacityUpdateCallback) {
@@ -41,8 +40,6 @@ export class OpacityTransferFunction {
             throw new Error('Could not get 2D context from canvas');
         }
         this.ctx = context;
-
-        this.outputElement = document.getElementById('opacityOutput');
         
         this.width = this.canvas.width;
         this.height = this.canvas.height;
@@ -334,27 +331,6 @@ export class OpacityTransferFunction {
         if (this.onUpdateCallback) {
             this.onUpdateCallback(buffer);
         }
-        
-        // Update the visual output
-        if (!this.outputElement) return;
-        
-        let html = '<strong>Opacity Buffer:</strong><br>';
-        html += '<code>const opacity = [';
-        
-        for (let i = 0; i < Math.min(buffer.length, 10); i++) {
-            html += buffer[i].toFixed(3);
-            if (i < 9) html += ', ';
-        }
-        
-        if (buffer.length > 10) {
-            html += ', ...];';
-        } else {
-            html += '];';
-        }
-        
-        html += '</code><br><small class="text-muted">100 values total</small>';
-        
-        this.outputElement.innerHTML = html;
     }
     
     public clear(): void {

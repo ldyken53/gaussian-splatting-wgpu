@@ -21,7 +21,7 @@ struct Uniforms {
     tan_fovy: f32,
     focal_x: f32,
     focal_y: f32,
-    scale_modifier: f32,
+    weight: f32,
 };
 
 @group(0) @binding(0) var<storage, read> point_data: array<PointInput>;
@@ -84,13 +84,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             canvas_size,
             num_tiles
         );
-        tile_counts[global_id.x] = (rect.w - rect.y) * (rect.z - rect.x);
-
-        // need to use tile id for more significant bits, and rounded depth for least significant for proper ordering
-
-        // writing tile_id just for the gaussian mean position
-        // let tile_id = u32(point_uv.x * num_tiles.x) + u32(floor(point_uv.y * num_tiles.y) * num_tiles.x);
-        // tiles[global_id.x] = tile_id * 1000 + u32(depth);
         
         var result: vec3<f32>;
         let clamped_value = clamp(gaussian.value, 0.0, 1.0);
@@ -116,7 +109,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             result.b = 1.0;
         }
         let color = vec3<f32>(1.0, gaussian.value, 0.0);
-        var opacity = opacity_function[u32(99 * clamped_value)];
+        var opacity = gaussian.opacity * opacity_function[u32(99 * clamped_value)];
+        if (gaussian.opacity < uniforms.weight) {
+          opacity = 0.0;
+        }
+        if (opacity > 0.0) {
+          tile_counts[global_id.x] = (rect.w - rect.y) * (rect.z - rect.x);
+        } else {
+          tile_counts[global_id.x] = 0;
+        }
         // save data so it doesn't have to be recomputed when computing tiles
         gaussian_data[global_id.x] = GaussianData(
             point_uv,

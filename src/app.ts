@@ -28,6 +28,7 @@ import { guessWorkgroupSize } from "./radix_sort/utils";
     const loadingPopup = document.getElementById('loading-popup')! as HTMLDivElement;
     const tileSizeSlider = document.getElementById('tileSize') as HTMLInputElement;
     tileSizeSlider.value = "16";
+    const weightSlider = document.getElementById('weightSlider') as HTMLInputElement;
     let canvas = document.getElementById("webgpu-canvas") as HTMLCanvasElement;
     const cameraFileInput = document.getElementById('cameraButton')! as HTMLInputElement;
     const cameraList = document.getElementById('cameraList')! as HTMLUListElement;
@@ -45,6 +46,10 @@ import { guessWorkgroupSize } from "./radix_sort/utils";
 
             const gaussians = new PackedGaussians(arrayBuffer);
             const renderer = new Renderer(canvas, interactiveCamera, device, gaussians, parseInt(tileSizeSlider.value));
+            weightSlider.oninput = () => {
+                renderer.updateWeight(parseFloat(weightSlider!.value));
+                document.getElementById('weightValue')!.innerText=weightSlider!.value;
+            };            
             opacityTransferFunction.setUpdateCallback((buffer: number[]) => {
                 renderer.updateOpacity(buffer);
             });

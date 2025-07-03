@@ -20,7 +20,7 @@ const uniformLayout = new Struct([
     ['tanHalfFovY', f32],
     ['focalX', f32],
     ['focalY', f32],
-    ['scaleModifier', f32],
+    ['weight', f32],
 ]);
 
 function mat4toArrayOfArrays(m: Mat4): number[][] {
@@ -58,6 +58,7 @@ export class Renderer {
     rangesBuffer: GPUBuffer; // tile ranges for each pixel, pixel index written with stopping point in sorted gaussian buffer
     opacityBuffer: GPUBuffer;
     opacityUpdated: boolean = false;
+    weight: number = 0.0;
 
     numGaussianBuffer: GPUBuffer;
     canvasSizeBuffer: GPUBuffer;
@@ -387,7 +388,7 @@ export class Renderer {
             tanHalfFovY: tanHalfFovY,
             focalX: camera.focalX,
             focalY: camera.focalY,
-            scaleModifier: camera.scaleModifier,
+            weight: this.weight,
         }
         
         console.log(uniforms);
@@ -631,6 +632,11 @@ export class Renderer {
             100 * 4
         );
         this.device.queue.submit([commandEncoder.finish()]);    
+        this.opacityUpdated = true;
+    }
+
+    public updateWeight(weight: number) {
+        this.weight = weight;
         this.opacityUpdated = true;
     }
 }
